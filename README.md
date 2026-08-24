@@ -118,6 +118,8 @@ Make sure you have Node.js (v18+) and standard package managers (`npm` or `pnpm`
 
 * **Network Size**: The SVG direct-DOM projection is optimized for up to ~150 concurrent paths. For larger datasets, migrating to MapLibre WebGL layers with custom shaders is recommended.
 * **Simulation Automation**: Future scope includes adding automatic AI triage dispatch recommendations based on real-time economic loss projections.
+* **Actual Dataset**: Due to the inaccessibility of the actual data from the various municipality organisations of Nagpur, we are unable to setup the ingestion pipeline, but the current pipelines are perfectly working for the demo dataset we have provided.
+* **Further Improvements**:Planning to add a Dynamic route allocation for public transport vehicles in case of the breakage of water pipelines or telecom exchange.
 
 ---
 
