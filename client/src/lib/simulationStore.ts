@@ -43,6 +43,7 @@ export type DependencyEdge = {
   source: string;
   target: string;
   label: string;
+  category?: "POWER" | "WATER" | "COMMS" | "CIVIC";
   status: EdgeStatus;
 };
 
@@ -158,16 +159,13 @@ const cloneInventory = (): CityInventory =>
 // ─── Node & Edge Data ────────────────────────────────────────────────────────
 
 const BASE_DEPENDENCY_EDGES: DependencyEdge[] = [
-  { id: "e-power-water", source: "power-substation", target: "water-treatment", label: "grid feed", status: "operational" },
-  { id: "e-power-comms", source: "power-substation", target: "telecom-exchange", label: "grid feed", status: "operational" },
-  { id: "e-power-mobility", source: "power-substation", target: "metro-signals", label: "grid feed", status: "operational" },
-  { id: "e-water-pumps", source: "water-treatment", target: "booster-pumps", label: "treated supply", status: "operational" },
-  { id: "e-water-hospital", source: "water-treatment", target: "hospital-icu", label: "critical supply", status: "operational" },
-  { id: "e-comms-hospital", source: "telecom-exchange", target: "hospital-icu", label: "data uplink", status: "operational" },
-  { id: "e-comms-dispatch", source: "telecom-exchange", target: "emergency-dispatch", label: "voice/data", status: "operational" },
-  { id: "e-hospital-dispatch", source: "hospital-icu", target: "emergency-dispatch", label: "bed status", status: "operational" },
-  { id: "e-pumps-fire", source: "booster-pumps", target: "fire-station", label: "pressure line", status: "operational" },
-  { id: "e-dispatch-fire", source: "emergency-dispatch", target: "fire-station", label: "dispatch signal", status: "operational" },
+  { id: "e-power-water", source: "power-substation", target: "water-treatment", label: "High-Voltage Power Feed", category: "POWER", status: "operational" },
+  { id: "e-power-comms", source: "power-substation", target: "telecom-exchange", label: "Telecom Power Feed", category: "POWER", status: "operational" },
+  { id: "e-water-pumps", source: "water-treatment", target: "booster-pumps", label: "Treated Water Pipeline", category: "WATER", status: "operational" },
+  { id: "e-pumps-hospital", source: "booster-pumps", target: "hospital-icu", label: "Emergency Water Supply", category: "WATER", status: "operational" },
+  { id: "e-comms-mobility", source: "telecom-exchange", target: "metro-signals", label: "Metro Signal Fiber Link", category: "COMMS", status: "operational" },
+  { id: "e-comms-dispatch", source: "telecom-exchange", target: "emergency-dispatch", label: "Emergency Voice & Data Trunk", category: "COMMS", status: "operational" },
+  { id: "e-dispatch-fire", source: "emergency-dispatch", target: "fire-station", label: "Fire Dispatch Signal", category: "CIVIC", status: "operational" },
 ];
 
 const INITIAL_NODES: InfrastructureNode[] = [
@@ -181,48 +179,46 @@ const INITIAL_NODES: InfrastructureNode[] = [
   { id: "fire-station", assetId: "CIV-21", label: "Fire Station 7", sector: "CIVIC", x: 915, y: 650, lng: 79.1025, lat: 21.1472, baseBuffer: 45, buffer: 45, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 55, currentLoad: 42 },
 ];
 
-export const REMEDIES_BY_NODE: Record<string, RemedyOption[]> = {
-  "power-substation": [
-    { id: "mobile-transformer", label: "Deploy mobile transformer", cost: 420000, effect: "restore" },
-    { id: "island-priority-feeder", label: "Island priority feeder", cost: 185000, effect: "buffer", bufferSeconds: 180 },
+export const REMEDIES_BY_SECTOR: Record<string, RemedyOption[]> = {
+  POWER: [
+    { id: "p-aux-battery", label: "Auxiliary Battery Bank", cost: 45000, effect: "buffer", bufferSeconds: 60 },
+    { id: "p-diesel-gen", label: "Emergency Diesel Generator", cost: 150000, effect: "buffer", bufferSeconds: 180 },
+    { id: "p-grid-bypass", label: "Substation Grid Feed Bypass", cost: 350000, effect: "buffer", bufferSeconds: 400 },
   ],
-  "water-treatment": [
-    { id: "membrane-skid", label: "Deploy membrane treatment skid", cost: 310000, effect: "restore" },
-    { id: "chlorination-train", label: "Run emergency chlorination train", cost: 155000, effect: "buffer", bufferSeconds: 120 },
+  WATER: [
+    { id: "w-aux-valve", label: "Auxiliary Pressure Valve", cost: 30000, effect: "buffer", bufferSeconds: 60 },
+    { id: "w-tanker-fleet", label: "Emergency Water Tanker Fleet", cost: 110000, effect: "buffer", bufferSeconds: 185 },
+    { id: "w-bypass-conduit", label: "Treatment Plant Bypass Conduit", cost: 280000, effect: "buffer", bufferSeconds: 420 },
   ],
-  "telecom-exchange": [
-    { id: "satellite-backhaul", label: "Activate satellite backhaul", cost: 160000, effect: "restore" },
-    { id: "carrier-reroute", label: "Reroute carrier fibre", cost: 72000, effect: "buffer", bufferSeconds: 150 },
+  HEALTH: [
+    { id: "h-oxygen-reserves", label: "Local Oxygen Reserves", cost: 25000, effect: "buffer", bufferSeconds: 60 },
+    { id: "h-mobile-icu", label: "Mobile ICU Care Units", cost: 130000, effect: "buffer", bufferSeconds: 190 },
+    { id: "h-microgrid-engage", label: "Emergency Microgrid Engage", cost: 320000, effect: "buffer", bufferSeconds: 450 },
   ],
-  "metro-signals": [
-    { id: "signal-generator", label: "Install portable signal generator", cost: 95000, effect: "restore" },
-    { id: "manual-control", label: "Deploy manual intersection control", cost: 28000, effect: "buffer", bufferSeconds: 90 },
+  MOBILITY: [
+    { id: "m-traffic-wardens", label: "Manual Traffic Wardens", cost: 15000, effect: "buffer", bufferSeconds: 50 },
+    { id: "m-signal-packs", label: "Portable Signal Power Packs", cost: 85000, effect: "buffer", bufferSeconds: 170 },
+    { id: "m-transit-rerouting", label: "Automated Transit Rerouting", cost: 220000, effect: "buffer", bufferSeconds: 380 },
   ],
-  "booster-pumps": [
-    { id: "pressure-pump", label: "Truck-mounted pressure pump", cost: 125000, effect: "restore" },
-    { id: "gravity-bypass", label: "Open gravity-fed bypass", cost: 60000, effect: "buffer", bufferSeconds: 120 },
+  COMMS: [
+    { id: "c-bandwidth-throttling", label: "Channel Bandwidth Throttling", cost: 20000, effect: "buffer", bufferSeconds: 60 },
+    { id: "c-microwave-rerouting", label: "Microwave Link Rerouting", cost: 95000, effect: "buffer", bufferSeconds: 180 },
+    { id: "c-satellite-backhaul", label: "Satellite Backhaul Uplink", cost: 260000, effect: "buffer", bufferSeconds: 410 },
   ],
-  "hospital-icu": [
-    { id: "icu-microgrid", label: "Engage ICU microgrid", cost: 275000, effect: "restore" },
-    { id: "sterile-reserve", label: "Draw sterile water reserve", cost: 82000, effect: "buffer", bufferSeconds: 180 },
-  ],
-  "emergency-dispatch": [
-    { id: "command-vehicle", label: "Stand up mobile command vehicle", cost: 118000, effect: "restore" },
-    { id: "mutual-aid-console", label: "Transfer to mutual-aid console", cost: 48000, effect: "buffer", bufferSeconds: 135 },
-  ],
-  "fire-station": [
-    { id: "tanker-shuttle", label: "Deploy tanker shuttle", cost: 86000, effect: "restore" },
-    { id: "county-channel", label: "Switch to county radio channel", cost: 24000, effect: "buffer", bufferSeconds: 120 },
+  CIVIC: [
+    { id: "v-reserve-staff", label: "Reserve Dispatch Staff", cost: 18000, effect: "buffer", bufferSeconds: 55 },
+    { id: "v-command-center", label: "Mobile Command Center", cost: 105000, effect: "buffer", bufferSeconds: 175 },
+    { id: "v-mutual-aid", label: "Mutual Aid Cross-Agency Link", cost: 250000, effect: "buffer", bufferSeconds: 390 },
   ],
 };
 
 export const DISASTER_PRESETS: DisasterPreset[] = [
   { id: "substation-flashover", code: "P-01", label: "Substation flashover", effect: "power loss", failedNodeIds: ["power-substation"], brokenEdgeIds: [] },
-  { id: "water-main-rupture", code: "W-02", label: "Water main rupture", effect: "2 routes lost", failedNodeIds: [], brokenEdgeIds: ["e-water-pumps", "e-water-hospital"] },
+  { id: "water-main-rupture", code: "W-02", label: "Water main rupture", effect: "2 routes lost", failedNodeIds: [], brokenEdgeIds: ["e-water-pumps", "e-pumps-hospital"] },
   { id: "telecom-blackout", code: "C-03", label: "Telecom blackout", effect: "relay outage", failedNodeIds: ["telecom-exchange"], brokenEdgeIds: [] },
-  { id: "seismic-corridor", code: "X-04", label: "Seismic corridor", effect: "compound strike", failedNodeIds: ["power-substation"], brokenEdgeIds: ["e-water-hospital"] },
-  { id: "monsoon-flood", code: "F-05", label: "2026 Monsoon Flood", effect: "multi-sector", failedNodeIds: ["booster-pumps", "metro-signals"], brokenEdgeIds: ["e-water-pumps", "e-pumps-fire"] },
-  { id: "cyber-attack", code: "C-06", label: "Cyber Attack", effect: "comms blackout", failedNodeIds: ["telecom-exchange"], brokenEdgeIds: ["e-comms-hospital", "e-comms-dispatch"] },
+  { id: "seismic-corridor", code: "X-04", label: "Seismic corridor", effect: "compound strike", failedNodeIds: ["power-substation"], brokenEdgeIds: ["e-comms-mobility"] },
+  { id: "monsoon-flood", code: "F-05", label: "2026 Monsoon Flood", effect: "multi-sector", failedNodeIds: ["booster-pumps", "metro-signals"], brokenEdgeIds: ["e-water-pumps", "e-pumps-hospital"] },
+  { id: "cyber-attack", code: "C-06", label: "Cyber Attack", effect: "comms blackout", failedNodeIds: ["telecom-exchange"], brokenEdgeIds: ["e-comms-mobility", "e-comms-dispatch"] },
 ];
 
 // ─── Graph Helpers ───────────────────────────────────────────────────────────
@@ -492,14 +488,17 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       // ── Compute traffic multiplier ─────────────────────────────────────
       const cityTrafficMultiplier = computeTrafficMultiplier(ticked);
 
-      // ── Accumulate scoreboard (per-second impact) ──────────────────────
-      let totalPeopleAffected = state.totalPeopleAffected;
+      // ── Accumulate scoreboard (impact calculation) ──────────────────────
+      let totalPeopleAffected = 0;
       let totalFinancialLoss = state.totalFinancialLoss;
       let currentFailedCount = 0;
       for (const node of ticked) {
         if (node.status === "failed") {
           currentFailedCount++;
-          totalPeopleAffected += POPULATION_WEIGHT[node.id] ?? 0;
+          // Only calculate population at risk when HEALTH or CIVIC nodes burst out / fail
+          if (node.sector === "HEALTH" || node.sector === "CIVIC") {
+            totalPeopleAffected += POPULATION_WEIGHT[node.id] ?? 0;
+          }
           totalFinancialLoss += (ECONOMIC_COST_PER_HOUR[node.id] ?? 0) / 3600;
         }
       }
@@ -552,12 +551,12 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       };
     }),
 
-  // ── Apply Remedy (with inventory, deployment delay & traffic multiplier) ─
   applyRemedy: (nodeId, remedyId) =>
     set((state) => {
       const target = state.nodes.find((n) => n.id === nodeId);
-      const remedy = REMEDIES_BY_NODE[nodeId]?.find((r) => r.id === remedyId);
-      if (!target || !remedy) return {};
+      if (!target) return {};
+      const remedy = REMEDIES_BY_SECTOR[target.sector]?.find((r) => r.id === remedyId);
+      if (!remedy) return {};
       if (target.status !== "buffering" && target.status !== "failed") return {};
 
       const newInventory = { ...state.inventory };
@@ -565,45 +564,19 @@ export const useSimulationStore = create<SimulationState>((set) => ({
         newInventory[key] = { ...newInventory[key] };
       }
 
-      let updatedNodes: InfrastructureNode[];
+      // Transition target node back from failure or buffer to appropriate active state
+      const updatedNodes = state.nodes.map<InfrastructureNode>((n) => {
+        if (n.id !== nodeId) return n;
+        
+        const isDisrupted = hasIncomingDisruption(n, state.nodes, state.edges);
+        const newStatus = isDisrupted ? "buffering" : "recovered";
 
-      if (remedy.effect === "restore") {
-        // ── RESTORE: costs a resource, triggers deployment delay ────────
-        const resourceType = RESOURCE_MAPPING[nodeId];
-        if (!resourceType) return {};
-
-        const slot = newInventory[resourceType];
-        if (slot.available <= 0) return {}; // Out of stock!
-
-        // Deduct from inventory
-        slot.available -= 1;
-
-        // ── TRAFFIC RIPPLE: rescue time is scaled by gridlock ────────────
-        const baseRescueTime = RESCUE_TIMES[nodeId] ?? 15;
-        const rescueTime = Math.ceil(baseRescueTime * state.cityTrafficMultiplier);
-
-        updatedNodes = state.nodes.map<InfrastructureNode>((n) => {
-          if (n.id !== nodeId) return n;
-          return {
-            ...n,
-            status: "repairing",
-            buffer: n.status === "failed" ? n.baseBuffer : n.buffer, // if failed, give them full buffer as "emergency restart"
-            rescueTimer: rescueTime,
-            maxRescueTime: rescueTime,
-            deployedResource: resourceType,
-          };
-        });
-      } else {
-        // ── BUFFER: instant, no resource cost ──────────────────────────
-        updatedNodes = state.nodes.map<InfrastructureNode>((n) => {
-          if (n.id !== nodeId) return n;
-          return {
-            ...n,
-            status: "buffering",
-            buffer: Math.max(n.buffer, 0) + (remedy.bufferSeconds ?? 0),
-          };
-        });
-      }
+        return {
+          ...n,
+          status: newStatus as NodeStatus,
+          buffer: Math.max(0, n.buffer) + (remedy.bufferSeconds ?? 0),
+        };
+      });
 
       const applied: AppliedRemedy = {
         nodeId,
@@ -680,6 +653,13 @@ export const useSimulationStore = create<SimulationState>((set) => ({
         finalNodes = recalculateDependents(finalNodes, edges);
       }
 
+      let totalPeopleAffected = 0;
+      for (const node of finalNodes) {
+        if (node.status === "failed" && (node.sector === "HEALTH" || node.sector === "CIVIC")) {
+          totalPeopleAffected += POPULATION_WEIGHT[node.id] ?? 0;
+        }
+      }
+
       return {
         edges,
         nodes: finalNodes,
@@ -687,7 +667,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
         activePresetId: preset.id,
         selectedRemedies: [],
         cityTrafficMultiplier: computeTrafficMultiplier(finalNodes),
-        totalPeopleAffected: 0,
+        totalPeopleAffected,
         totalFinancialLoss: 0,
         cascadeDepth: computeCascadeDepth(finalNodes, edges),
         peakFailedCount: finalNodes.filter((n) => n.status === "failed").length,
@@ -711,7 +691,11 @@ export const useSimulationStore = create<SimulationState>((set) => ({
 
 // ─── Selectors & Helpers ─────────────────────────────────────────────────────
 
-export const getRemediesForNode = (nodeId: string) => REMEDIES_BY_NODE[nodeId] ?? [];
+export const getRemediesForNode = (nodeId: string) => {
+  const node = useSimulationStore.getState().nodes.find(n => n.id === nodeId);
+  if (!node) return [];
+  return REMEDIES_BY_SECTOR[node.sector] ?? [];
+};
 export const getNodeOutDegree = (nodeId: string) => childIdsFor(nodeId).length;
 export const getResourceForNode = (nodeId: string): ResourceType | null => RESOURCE_MAPPING[nodeId] ?? null;
 export const getRescueTimeForNode = (nodeId: string): number => RESCUE_TIMES[nodeId] ?? 15;

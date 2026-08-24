@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import { 
   useSimulationStore, 
@@ -10,7 +10,6 @@ import LiveCityMap from "./LiveCityMap";
 import ContextPanel from "./ContextPanel";
 import { 
   Activity, 
-  Shield, 
   RotateCcw, 
   AlertTriangle, 
   Play, 
@@ -21,18 +20,15 @@ import {
   Upload,
   Clock,
   Circle,
-  Zap,
-  Droplets,
-  Radio,
-  Heart,
-  Users
+  ChevronDown
 } from "lucide-react";
+
 
 export default function DashboardLayout() {
   const nodes = useSimulationStore((state) => state.nodes);
   const edges = useSimulationStore((state) => state.edges);
-  const inventory = useSimulationStore((state) => state.inventory);
   const activePresetId = useSimulationStore((state) => state.activePresetId);
+
   const totalPeopleAffected = useSimulationStore((state) => state.totalPeopleAffected);
   const totalFinancialLoss = useSimulationStore((state) => state.totalFinancialLoss);
   const cascadeDepth = useSimulationStore((state) => state.cascadeDepth);
@@ -47,6 +43,19 @@ export default function DashboardLayout() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState<string>("");
   const [isRunning, setIsPlaying] = useState<boolean>(true);
+  const [isPresetsOpen, setIsPresetsOpen] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsPresetsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Clock Ticker for ICCC Top Bar
   useEffect(() => {
@@ -98,65 +107,120 @@ export default function DashboardLayout() {
   const stabilityIndex = nodes.length > 0 ? Math.round((operationalCount / nodes.length) * 100) : 100;
 
   return (
-    <main className="h-screen w-screen overflow-hidden flex flex-col bg-[#050505] text-zinc-100 font-sans select-none relative">
+    <main className="h-screen w-screen overflow-hidden flex flex-col bg-[#0d1117] text-[#c9d1d9] font-sans select-none relative">
       
-      {/* ── Top Bar (Military Status Header) ── */}
-      <header className="h-10 border-b border-zinc-800/80 bg-black flex items-center justify-between px-4 z-40 text-zinc-400 font-mono text-[10px] tracking-widest uppercase">
+      {/* ── Top Bar (GitHub Dark Neumorphic Header) ── */}
+      <header className="h-14 bg-[#0d1117] flex items-center justify-between px-6 z-40 text-[#8b949e] font-sans text-xs tracking-wide" style={{ boxShadow: '0 4px 10px #040609, 0 -2px 4px #161b22' }}>
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5 text-zinc-100 font-bold">
-            <Crosshair size={13} className="text-[#00E5FF] animate-pulse" />
-            <span>URBAN CASCADE FIELD // LIVE METRICS</span>
+          <div className="flex items-center gap-2 text-[#ffffff] font-extrabold text-sm tracking-wide">
+            <Crosshair size={16} className="text-[#58a6ff]" />
+            <span>Urban Cascade Field // Live Metrics</span>
           </div>
-          <span className="text-zinc-700">|</span>
-          <div className="flex items-center gap-1.5 text-zinc-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#00FF66] animate-ping" />
-            <span>NAGPUR GRID SECTOR 04</span>
+          <span className="text-[#21262d]">|</span>
+          <div className="flex items-center gap-2 text-[#8b949e] font-bold text-xs">
+            <span className="h-2 w-2 rounded-full bg-[#3fb950] animate-ping" />
+            <span>Nagpur Grid Sector 04</span>
           </div>
         </div>
 
         <div className="flex items-center gap-6">
           {/* Traffic / Gridlock Status */}
           {isGridlock ? (
-            <div className="flex items-center gap-1.5 text-[#FF0033] font-bold bg-[#FF0033]/10 px-2 py-0.5 border border-[#FF0033]/30">
-              <AlertTriangle size={11} className="animate-bounce" />
-              <span>GRIDLOCK ACTIVE (TRANSIT ×{cityTrafficMultiplier})</span>
+            <div className="flex items-center gap-2 text-[#f85149] font-extrabold text-xs px-3.5 py-1.5 rounded-xl" style={{ boxShadow: 'inset 3px 3px 6px #080404, inset -3px -3px 6px #240c0c', background: '#1c0c0d' }}>
+              <AlertTriangle size={13} className="animate-bounce" />
+              <span>Gridlock Active (Transit ×{cityTrafficMultiplier})</span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-[#00FF66]">
-              <Circle size={8} className="fill-[#00FF66]" />
-              <span>SYSTEM: OPERATIONAL</span>
+            <div className="flex items-center gap-2 text-[#3fb950] font-extrabold text-xs">
+              <Circle size={10} className="fill-[#3fb950]" />
+              <span>System: Operational</span>
             </div>
           )}
 
-          <span className="text-zinc-700">|</span>
+          <span className="text-[#21262d]">|</span>
+
+          {/* Strike Presets Dropdown Menu */}
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setIsPresetsOpen(!isPresetsOpen)}
+              className="px-3.5 py-1.5 flex items-center gap-2 transition-all rounded-xl font-extrabold text-xs bg-[#0d1117] text-[#d29922] hover:text-[#ffffff]"
+              style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}
+            >
+              <Flame size={14} className="text-[#d29922]" />
+              <span>Strike Presets</span>
+              <ChevronDown size={14} className={`transition-transform duration-200 ${isPresetsOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {isPresetsOpen && (
+              <div 
+                className="absolute right-0 mt-2 w-72 bg-[#0d1117] rounded-2xl p-3 z-50 space-y-2 border border-[#21262d]"
+                style={{ boxShadow: '6px 6px 16px #040609, -6px -6px 16px #161b22' }}
+              >
+                <div className="text-[11px] font-extrabold text-[#8b949e] px-2 pb-2 border-b border-[#161b22] flex justify-between items-center">
+                  <span>Disaster Scenarios</span>
+                  <span className="text-[#58a6ff]">6 Presets</span>
+                </div>
+                <div className="space-y-1.5 max-h-72 overflow-y-auto scrollbar-thin">
+                  {DISASTER_PRESETS.map((preset) => {
+                    const isActive = activePresetId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        onClick={() => {
+                          applyPreset(preset.id);
+                          setIsPresetsOpen(false);
+                        }}
+                        className={`w-full p-2.5 text-left rounded-xl transition-all flex items-center justify-between ${
+                          isActive
+                            ? "text-[#f85149] bg-[#1c0c0d]"
+                            : "text-[#8b949e] hover:text-[#ffffff] hover:bg-[#161b22]"
+                        }`}
+                        style={isActive ? { boxShadow: 'inset 3px 3px 6px #080404, inset -3px -3px 6px #240c0c' } : {}}
+                      >
+                        <div>
+                          <span className="text-[10px] text-[#58a6ff] font-extrabold block">{preset.code}</span>
+                          <strong className="text-xs font-extrabold block text-[#ffffff]">{preset.label}</strong>
+                        </div>
+                        {isActive && <span className="text-[10px] font-black text-[#f85149]">Active</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <span className="text-[#21262d]">|</span>
 
           {/* Clock */}
-          <div className="flex items-center gap-1 text-zinc-300">
-            <Clock size={11} className="text-zinc-500" />
+          <div className="flex items-center gap-1.5 text-[#ffffff] font-extrabold text-xs">
+            <Clock size={13} className="text-[#58a6ff]" />
             <span>{currentTime || "00:00:00 IST"}</span>
           </div>
 
-          <span className="text-zinc-700">|</span>
+          <span className="text-[#21262d]">|</span>
 
           {/* Master Sim Controls */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setIsPlaying(!isRunning)}
-              className={`px-2 py-0.5 border flex items-center gap-1 transition-all rounded-none ${
+              className={`px-3.5 py-1.5 flex items-center gap-1.5 transition-all rounded-xl font-extrabold text-xs bg-[#0d1117] ${
                 isRunning 
-                  ? "border-cyan-500/40 text-[#00E5FF] bg-cyan-950/20 hover:bg-cyan-500 hover:text-black" 
-                  : "border-amber-500/40 text-[#FF9900] bg-amber-950/20 hover:bg-amber-500 hover:text-black"
+                  ? "text-[#58a6ff]" 
+                  : "text-[#d29922]"
               }`}
+              style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}
             >
-              {isRunning ? <Pause size={10} /> : <Play size={10} />}
-              <span>{isRunning ? "PAUSE" : "RESUME"}</span>
+              {isRunning ? <Pause size={12} /> : <Play size={12} />}
+              <span>{isRunning ? "Pause" : "Resume"}</span>
             </button>
             <button
               onClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); reset(); }}
-              className="px-2 py-0.5 border border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-white hover:border-zinc-600 transition-all rounded-none flex items-center gap-1"
+              className="px-3.5 py-1.5 text-[#8b949e] hover:text-[#ffffff] transition-all rounded-xl flex items-center gap-1.5 font-extrabold text-xs bg-[#0d1117]"
+              style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}
             >
-              <RotateCcw size={10} />
-              <span>RESET</span>
+              <RotateCcw size={12} />
+              <span>Reset</span>
             </button>
           </div>
         </div>
@@ -165,140 +229,65 @@ export default function DashboardLayout() {
       {/* ── Main Command Center Stage ── */}
       <section className="flex flex-1 overflow-hidden relative">
         
-        {/* ── Left HUD Panel (w-96, Glassmorphism, Sharp Hairline Borders) ── */}
-        <aside className="w-96 border-r border-zinc-800 bg-black/85 backdrop-blur-md flex flex-col z-30 font-mono text-[10px] tracking-widest overflow-hidden rounded-none">
+        {/* ── Left Sidebar Panel ── */}
+        <aside className="w-[440px] bg-[#0d1117] flex flex-col z-30 font-sans text-xs tracking-wide overflow-hidden" style={{ boxShadow: '6px 0 16px #040609' }}>
           
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto p-5 space-y-5 scrollbar-thin">
             
             {/* ── Block 1: Telemetry Scoreboard ── */}
-            <section className="p-3 border border-zinc-800/80 bg-[#09090b]/80 space-y-2 rounded-none">
-              <div className="flex justify-between items-center text-zinc-400 border-b border-zinc-800/60 pb-1.5">
-                <span className="flex items-center gap-1.5 text-zinc-300 font-bold">
-                  <Activity size={12} className="text-[#00FF66]" />
-                  TELEMETRY SCOREBOARD
+            <section className="p-5 bg-[#0d1117] space-y-4 rounded-2xl" style={{ boxShadow: '6px 6px 14px #040609, -6px -6px 14px #161b22' }}>
+              <div className="flex justify-between items-center text-[#8b949e] pb-2.5" style={{ borderBottom: '1px solid #161b22' }}>
+                <span className="flex items-center gap-2 text-[#ffffff] font-extrabold text-sm tracking-wide">
+                  <Activity size={17} className="text-[#3fb950]" />
+                  Telemetry Scoreboard
                 </span>
-                <span className="text-zinc-500">LIVE FEED</span>
+                <span className="text-xs font-bold text-[#58a6ff]">Live Feed</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="p-2 border border-zinc-800/60 bg-black/50">
-                  <span className="text-[8px] text-zinc-500 uppercase block">PEOPLE AT RISK</span>
-                  <strong className="text-sm font-bold text-zinc-100 tracking-wider">
+              <div className="grid grid-cols-2 gap-3.5">
+                <div className="p-4 rounded-xl bg-[#0d1117]" style={{ boxShadow: 'inset 4px 4px 8px #040609, inset -4px -4px 8px #161b22' }}>
+                  <span className="text-[11px] text-[#8b949e] font-extrabold block mb-1">People at Risk</span>
+                  <strong className="text-lg font-black text-[#ffffff] tracking-wider">
                     {totalPeopleAffected.toLocaleString()}
                   </strong>
                 </div>
-                <div className="p-2 border border-zinc-800/60 bg-black/50">
-                  <span className="text-[8px] text-zinc-500 uppercase block">CASCADE DEPTH</span>
-                  <strong className="text-sm font-bold text-[#FF9900] tracking-wider">
-                    LEVEL {cascadeDepth}
+                <div className="p-4 rounded-xl bg-[#0d1117]" style={{ boxShadow: 'inset 4px 4px 8px #040609, inset -4px -4px 8px #161b22' }}>
+                  <span className="text-[11px] text-[#8b949e] font-extrabold block mb-1">Cascade Depth</span>
+                  <strong className="text-lg font-black text-[#d29922] tracking-wider">
+                    Level {cascadeDepth}
                   </strong>
                 </div>
               </div>
 
               {/* Economic Loss Ticker */}
-              <div className="p-2.5 border border-rose-950/60 bg-rose-950/20 flex justify-between items-center">
+              <div className="p-4 rounded-xl flex justify-between items-center" style={{ boxShadow: 'inset 4px 4px 8px #080404, inset -4px -4px 8px #240c0c', background: '#1c0c0d' }}>
                 <div>
-                  <span className="text-[8px] text-rose-400 uppercase block">TOTAL ECONOMIC LOSS</span>
-                  <strong className="text-base font-bold text-[#FF0033] tracking-tight">
-                    ₹{(totalFinancialLoss / 100000).toFixed(2)} LAKHS
+                  <span className="text-[11px] text-[#ff7675] font-extrabold block">Total Economic Loss</span>
+                  <strong className="text-xl font-black text-[#f85149] tracking-tight">
+                    ₹{(totalFinancialLoss / 100000).toFixed(2)} Lakhs
                   </strong>
                 </div>
                 <div className="text-right">
-                  <span className="text-[8px] text-zinc-500 uppercase block">PEAK FAILURES</span>
-                  <span className="text-xs font-bold text-rose-400">{peakFailedCount} ASSETS</span>
+                  <span className="text-[11px] text-[#8b949e] font-bold block">Peak Failures</span>
+                  <span className="text-base font-black text-[#f85149]">{peakFailedCount} Assets</span>
                 </div>
               </div>
             </section>
 
-            {/* ── Block 2: City Garage (Inventory Metrics) ── */}
-            <section className="p-3 border border-zinc-800/80 bg-[#09090b]/80 space-y-2.5 rounded-none">
-              <div className="flex justify-between items-center text-zinc-400 border-b border-zinc-800/60 pb-1.5">
-                <span className="flex items-center gap-1.5 text-zinc-300 font-bold">
-                  <Shield size={12} className="text-[#00E5FF]" />
-                  CITY GARAGE INVENTORY
-                </span>
-                <span className="text-zinc-500">DISPATCH READY</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="p-2 border border-zinc-800/60 bg-black/40 flex justify-between items-center">
-                  <div>
-                    <span className="text-[8px] text-zinc-500 block">DIESEL GENSETS</span>
-                    <span className="text-zinc-300 font-bold">POWER SEC</span>
-                  </div>
-                  <strong className="text-sm text-zinc-100 font-bold">{inventory.generator.available}/{inventory.generator.max}</strong>
-                </div>
-
-                <div className="p-2 border border-zinc-800/60 bg-black/40 flex justify-between items-center">
-                  <div>
-                    <span className="text-[8px] text-zinc-500 block">WATER BOWSERS</span>
-                    <span className="text-zinc-300 font-bold">WATER SEC</span>
-                  </div>
-                  <strong className="text-sm text-zinc-100 font-bold">{inventory.waterTanker.available}/{inventory.waterTanker.max}</strong>
-                </div>
-
-                <div className="p-2 border border-zinc-800/60 bg-black/40 flex justify-between items-center">
-                  <div>
-                    <span className="text-[8px] text-zinc-500 block">SAT RELAYS</span>
-                    <span className="text-zinc-300 font-bold">COMMS SEC</span>
-                  </div>
-                  <strong className="text-sm text-zinc-100 font-bold">{inventory.commsSat.available}/{inventory.commsSat.max}</strong>
-                </div>
-
-                <div className="p-2 border border-zinc-800/60 bg-black/40 flex justify-between items-center">
-                  <div>
-                    <span className="text-[8px] text-zinc-500 block">MED SQUADS</span>
-                    <span className="text-zinc-300 font-bold">HEALTH SEC</span>
-                  </div>
-                  <strong className="text-sm text-zinc-100 font-bold">{inventory.medUnit.available}/{inventory.medUnit.max}</strong>
-                </div>
-              </div>
-            </section>
-
-            {/* ── Block 3: Disaster Presets Triggers ── */}
-            <section className="p-3 border border-zinc-800/80 bg-[#09090b]/80 space-y-2 rounded-none">
-              <div className="flex justify-between items-center text-zinc-400 border-b border-zinc-800/60 pb-1.5">
-                <span className="flex items-center gap-1.5 text-zinc-300 font-bold">
-                  <Flame size={12} className="text-[#FF9900]" />
-                  STRIKE PRESETS (CASCADE INJECTION)
-                </span>
-                <span className="text-zinc-500">6 SCENARIOS</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5">
-                {DISASTER_PRESETS.map((preset) => {
-                  const isActive = activePresetId === preset.id;
-                  return (
-                    <button
-                      key={preset.id}
-                      onClick={() => applyPreset(preset.id)}
-                      className={`p-2 text-left border rounded-none transition-all ${
-                        isActive
-                          ? "border-[#FF0033] bg-[#FF0033]/15 text-rose-300 shadow-[0_0_8px_rgba(255,0,51,0.3)]"
-                          : "border-zinc-800/80 bg-black/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-                      }`}
-                    >
-                      <span className="text-[8px] text-zinc-500 block">{preset.code}</span>
-                      <strong className="text-[10px] font-bold block truncate mt-0.5">{preset.label}</strong>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* ── Block 4: Scenario Import / Export IO ── */}
-            <section className="p-2.5 border border-zinc-800/80 bg-[#09090b]/80 flex gap-2 rounded-none">
+            {/* ── Block 2: Scenario Import / Export IO ── */}
+            <section className="p-4 bg-[#0d1117] flex gap-3 rounded-2xl" style={{ boxShadow: '6px 6px 14px #040609, -6px -6px 14px #161b22' }}>
               <button
                 onClick={handleExportJSON}
-                className="flex-1 py-1.5 px-2 border border-zinc-800 bg-black text-zinc-400 hover:text-white hover:border-zinc-600 rounded-none flex items-center justify-center gap-1.5 transition-all"
+                className="flex-1 py-3 px-3 text-[#ffffff] hover:text-[#58a6ff] rounded-xl flex items-center justify-center gap-2 transition-all bg-[#0d1117] text-sm font-extrabold"
+                style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}
               >
-                <Download size={11} />
-                <span>EXPORT .JSON</span>
+                <Download size={15} className="text-[#3fb950]" />
+                <span>Export .JSON</span>
               </button>
 
-              <label className="flex-1 py-1.5 px-2 border border-zinc-800 bg-black text-zinc-400 hover:text-white hover:border-zinc-600 rounded-none flex items-center justify-center gap-1.5 cursor-pointer transition-all">
-                <Upload size={11} />
-                <span>LOAD .JSON</span>
+              <label className="flex-1 py-3 px-3 text-[#ffffff] hover:text-[#58a6ff] rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all bg-[#0d1117] text-sm font-extrabold" style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}>
+                <Upload size={15} className="text-[#58a6ff]" />
+                <span>Load .JSON</span>
                 <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
               </label>
             </section>
@@ -306,14 +295,14 @@ export default function DashboardLayout() {
           </div>
 
           {/* Left Footer System Readout */}
-          <footer className="p-3 border-t border-zinc-800 bg-black/90 flex justify-between items-center text-[9px] text-zinc-600">
-            <span>GRID NODES: {nodes.length}</span>
-            <span className="text-[#00FF66]">STABILITY: {stabilityIndex}%</span>
+          <footer className="p-4 bg-[#0d1117] flex justify-between items-center text-xs font-extrabold text-[#8b949e]" style={{ boxShadow: 'inset 4px 4px 8px #040609, inset -4px -4px 8px #161b22' }}>
+            <span>Grid Nodes: {nodes.length}</span>
+            <span className="text-[#3fb950] font-black">Stability: {stabilityIndex}%</span>
           </footer>
         </aside>
 
-        {/* ── Center Stage: Map Layer with Cinematic Vignette & Scanlines ── */}
-        <div className="flex-1 h-full relative overflow-hidden bg-[#050505]">
+        {/* ── Center Stage: Map Layer ── */}
+        <div className="flex-1 h-full relative overflow-hidden bg-[#0d1117]">
           
           {/* Real-Time Live City Map (MapLibre + Framer Motion Markers) */}
           <LiveCityMap
@@ -328,14 +317,8 @@ export default function DashboardLayout() {
             }}
           />
 
-          {/* Vignette Overlay (Blends edges into sidebars) */}
-          <div className="hud-vignette absolute inset-0 pointer-events-none z-10" />
-
-          {/* Scanline CRT Monitor Overlay */}
-          <div className="hud-scanlines absolute inset-0 pointer-events-none z-10 opacity-35" />
-
-          {/* Tactical Crosshair Watermarks */}
-          <div className="absolute top-4 left-4 pointer-events-none text-zinc-700 font-mono text-[9px] z-20">
+          {/* Coordinate Watermarks */}
+          <div className="absolute top-4 left-4 pointer-events-none text-[#484f58] font-mono text-[9px] z-20 px-3 py-1.5 rounded-xl bg-[#0d1117]" style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}>
             <span>LAT 21.1458° N // LNG 79.0882° E</span>
           </div>
 

@@ -72,7 +72,6 @@ export default function InfrastructureNodeComponent({ data, selected }: NodeProp
       )}
 
       <div className="node-meta-row">
-        <span>{data.assetId}</span>
         {data.status === "buffering" ? (
           <span className="node-timer">{formatDuration(data.buffer)}</span>
         ) : data.status === "repairing" ? (

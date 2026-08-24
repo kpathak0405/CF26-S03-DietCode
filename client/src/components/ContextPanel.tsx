@@ -1,29 +1,27 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { motion } from "framer-motion";
 import { 
   useSimulationStore, 
   getRemediesForNode, 
-  simulateOutcome,
   POPULATION_WEIGHT,
   ECONOMIC_COST_PER_HOUR,
   type InfrastructureNode,
   type ResourceType 
 } from "@/lib/simulationStore";
+
 import { 
   X, 
   Crosshair, 
-  AlertTriangle, 
   Zap, 
   Droplets, 
   Radio, 
   Heart, 
   Shield, 
   Activity, 
-  Gauge, 
   Clock, 
-  Flame,
-  Radio as SignalIcon
+  Flame
 } from "lucide-react";
+
 
 interface ContextPanelProps {
   selectedNodeId: string;
@@ -39,37 +37,43 @@ const sectorIcons: Record<string, typeof Zap> = {
   CIVIC: Shield,
 };
 
-const statusColors: Record<string, { text: string; border: string; glow: string; label: string }> = {
+const statusColors: Record<string, { text: string; bg: string; label: string }> = {
   operational: {
-    text: "text-[#00FF66]",
-    border: "border-[#00FF66]",
-    glow: "shadow-[0_0_12px_rgba(0,255,102,0.4)]",
-    label: "ONLINE // OPERATIONAL",
+    text: "text-[#3fb950]",
+    bg: "bg-[#0d1e13]",
+    label: "Online // Operational",
   },
   recovered: {
-    text: "text-[#00FF66]",
-    border: "border-[#00FF66]",
-    glow: "shadow-[0_0_12px_rgba(0,255,102,0.4)]",
-    label: "ONLINE // RECOVERED",
+    text: "text-[#3fb950]",
+    bg: "bg-[#0d1e13]",
+    label: "Online // Recovered",
   },
   buffering: {
-    text: "text-[#FF9900]",
-    border: "border-[#FF9900]",
-    glow: "shadow-[0_0_12px_rgba(255,153,0,0.4)]",
-    label: "WARN // BUFFERING",
+    text: "text-[#d29922]",
+    bg: "bg-[#1c180e]",
+    label: "Warning // Buffering",
   },
   failed: {
-    text: "text-[#FF0033]",
-    border: "border-[#FF0033]",
-    glow: "shadow-[0_0_12px_rgba(255,0,51,0.5)]",
-    label: "OFFLINE // DESTABILIZED",
+    text: "text-[#f85149]",
+    bg: "bg-[#200f11]",
+    label: "Offline // Destabilized",
   },
   repairing: {
-    text: "text-[#00E5FF]",
-    border: "border-[#00E5FF]",
-    glow: "shadow-[0_0_12px_rgba(0,229,255,0.4)]",
-    label: "EN ROUTE // DISPATCHED",
+    text: "text-[#58a6ff]",
+    bg: "bg-[#0e1a24]",
+    label: "En Route // Dispatched",
   },
+};
+
+const NODE_FUNCTIONS: Record<string, string> = {
+  "power-substation": "Acts as the primary electrical transmission hub for the city grid. Steps down extra-high voltage feeds and routes electricity to water treatment facilities, telecom exchanges, and secondary grids. A failure here triggers an immediate power cascade across all dependent sectors.",
+  "water-treatment": "Purifies and pumps critical municipal water supply. Relies heavily on the power substation to operate filter trains and heavy pump machinery. Directly delivers clean water to booster pump stations, securing flow to emergency medical units.",
+  "telecom-exchange": "Anchors the core municipal communications network. Manages fiber-optic backhauls, emergency voice trunk lines, and metro signaling data paths. Operates under battery backup if power fails, but cascades rapidly once backup power depletes.",
+  "metro-signals": "Controls transit network switching and automated rail signals. Synchronizes light rail flow to prevent collisions and minimize public transit delays. Delays in repair response are heavily amplified if civic traffic congestion is elevated.",
+  "booster-pumps": "Maintains pressurized water flow across the regional distribution pipeline. Compensates for gravity loss to ensure emergency services and medical facilities receive uninterrupted water supply. Overloading sibling stations triggers pump overheating.",
+  "hospital-icu": "Operates life-saving medical equipment, intensive care suites, and emergency treatment rooms. Requires uninterrupted water supply and electricity. Directly impacts human lives when operations degrade, causing high population risk.",
+  "emergency-dispatch": "Coordinates police, ambulance, and disaster response units citywide. Acts as the nerve center for incident triage and emergency command communications. Completely dependent on active telecommunication fiber uplinks.",
+  "fire-station": "Dispatches active fire suppression units, rescue vehicles, and emergency crew teams. Responds directly to civic distress calls and hazardous cascading events. Relies on emergency dispatch channels to deploy rescue crews.",
 };
 
 export default function ContextPanel({ selectedNodeId, onClose }: ContextPanelProps) {
@@ -83,11 +87,6 @@ export default function ContextPanel({ selectedNodeId, onClose }: ContextPanelPr
   const node = nodes.find((n) => n.id === selectedNodeId);
   const remedies = getRemediesForNode(selectedNodeId);
 
-  // Predictive Triage lookahead
-  const triage = useMemo(() => {
-    if (!node) return null;
-    return simulateOutcome(node.id, nodes, edges);
-  }, [node, nodes, edges]);
 
   if (!node) return null;
 
@@ -98,11 +97,6 @@ export default function ContextPanel({ selectedNodeId, onClose }: ContextPanelPr
   const isRepairing = node.status === "repairing";
   const isOperational = node.status === "operational" || node.status === "recovered";
 
-  // Capacity Load calculations
-  const loadPercentage = node.capacity > 0 
-    ? Math.round((node.currentLoad / node.capacity) * 100) 
-    : 0;
-  const isOverloaded = node.currentLoad > node.capacity;
 
   // Format seconds to MM:SS
   const formatTimer = (seconds: number) => {
@@ -117,180 +111,73 @@ export default function ContextPanel({ selectedNodeId, onClose }: ContextPanelPr
     ? ((node.maxRescueTime - node.rescueTimer) / node.maxRescueTime) * 100 
     : 0;
 
-  // Primary restore remedy
-  const restoreRemedy = remedies.find((r) => r.effect === "restore") || remedies[0];
-  const bufferRemedy = remedies.find((r) => r.effect === "buffer");
+
 
   return (
     <motion.aside
-      className="absolute top-10 right-0 bottom-0 w-[400px] z-40 flex flex-col bg-black/90 backdrop-blur-xl border-l border-zinc-800 rounded-none shadow-[0_0_40px_rgba(0,0,0,0.8)] overflow-hidden"
+      className="absolute top-12 right-0 bottom-0 w-[400px] z-40 flex flex-col bg-[#0d1117] overflow-hidden rounded-l-2xl text-[#c9d1d9]"
+      style={{ boxShadow: '-10px 0 24px #040609' }}
       initial={{ x: "100%", opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: "100%", opacity: 0 }}
       transition={{ type: "spring", stiffness: 350, damping: 32 }}
     >
-      {/* Corner Bracket Reticles */}
-      <div className="corner-bracket corner-tl" />
-      <div className="corner-bracket corner-bl" />
-
       {/* ── Top Header Bar ── */}
-      <header className="flex items-center justify-between px-5 py-3 border-b border-zinc-800 bg-[#070709]">
+      <header className="flex items-center justify-between px-5 py-3.5 bg-[#0d1117]" style={{ boxShadow: '0 4px 8px #040609' }}>
         <div className="flex items-center gap-2">
-          <Crosshair size={14} className="text-[#00E5FF] animate-pulse" />
-          <span className="text-[10px] font-mono font-bold tracking-widest text-zinc-400 uppercase">
-            TARGET // {node.assetId}
+          <Crosshair size={16} className="text-[#58a6ff]" />
+          <span className="text-xs font-sans font-extrabold tracking-wide text-[#ffffff]">
+            Target // {node.assetId}
           </span>
         </div>
         <button
           onClick={onClose}
-          className="p-1 rounded-none border border-zinc-800 bg-[#0d0d10] text-zinc-400 hover:text-white hover:border-zinc-600 hover:bg-zinc-800 transition-all active:scale-95"
+          className="p-1.5 rounded-xl text-[#8b949e] hover:text-[#ffffff] transition-all active:scale-95 bg-[#0d1117]"
+          style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}
         >
-          <X size={14} />
+          <X size={16} />
         </button>
       </header>
 
       {/* ── Asset Title Banner ── */}
-      <section className="px-5 py-4 border-b border-zinc-800/80 bg-zinc-950/40">
+      <section className="px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <Icon size={16} className={statusConfig.text} />
-              <span className="text-[10px] font-mono font-bold tracking-widest text-zinc-500 uppercase">
-                {node.sector} INFRASTRUCTURE
+              <Icon size={18} className={statusConfig.text} />
+              <span className="text-xs font-sans font-extrabold tracking-wide text-[#58a6ff]">
+                {node.sector.charAt(0) + node.sector.slice(1).toLowerCase()} Infrastructure
               </span>
             </div>
-            <h2 className="text-base font-mono font-bold tracking-tight text-zinc-100 uppercase mt-1">
+            <h2 className="text-xl font-sans font-black tracking-tight text-[#ffffff] mt-1">
               {node.label}
             </h2>
           </div>
 
-          <span className={`px-2 py-1 text-[9px] font-mono font-bold tracking-widest uppercase border rounded-none ${statusConfig.text} ${statusConfig.border} ${statusConfig.glow} bg-black/60`}>
+          <span className={`px-3 py-1.5 text-xs font-sans font-extrabold tracking-wide rounded-xl ${statusConfig.text} ${statusConfig.bg}`} style={{ boxShadow: 'inset 3px 3px 6px rgba(0,0,0,0.4), inset -3px -3px 6px rgba(255,255,255,0.04)' }}>
             {statusConfig.label}
           </span>
         </div>
       </section>
 
       {/* ── Main Telemetry Deck (Scrollable) ── */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 font-mono scrollbar-thin">
-        
-        {/* ── Telemetry Box 1: Load Capacity Meter ── */}
-        <section className="p-3.5 border border-zinc-800 bg-[#0b0b0e] space-y-2.5 rounded-none relative">
-          <div className="flex justify-between items-center text-[10px] tracking-widest uppercase text-zinc-400">
-            <span className="flex items-center gap-1.5">
-              <Gauge size={12} className={isOverloaded ? "text-[#FF0033]" : "text-[#00E5FF]"} />
-              LOAD UTILIZATION
-            </span>
-            <span className={isOverloaded ? "text-[#FF0033] font-bold" : "text-zinc-200"}>
-              {node.currentLoad} / {node.capacity} MW ({loadPercentage}%)
-            </span>
-          </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 font-sans scrollbar-thin">
 
-          {/* Thin Horizontal Progress Gauge */}
-          <div className="h-1.5 w-full bg-zinc-900 border border-zinc-800 rounded-none overflow-hidden">
-            <div
-              className={`h-full transition-all duration-500 ${
-                isOverloaded
-                  ? "bg-[#FF0033] shadow-[0_0_8px_#FF0033]"
-                  : loadPercentage > 85
-                  ? "bg-[#FF9900]"
-                  : "bg-[#00FF66]"
-              }`}
-              style={{ width: `${Math.min(100, loadPercentage)}%` }}
-            />
-          </div>
 
-          {isOverloaded && (
-            <div className="flex items-center gap-1.5 text-[9px] font-bold text-[#FF0033] bg-[#FF0033]/10 border border-[#FF0033]/30 p-1.5">
-              <AlertTriangle size={11} className="animate-pulse" />
-              <span>CAPACITY EXCEEDED // SIBLING OVERLOAD RISK</span>
+
+        {/* ── Impact Metrics ── */}
+        <section className="p-4 bg-[#0d1117] space-y-3 rounded-2xl" style={{ boxShadow: '6px 6px 14px #040609, -6px -6px 14px #161b22' }}>
+          <span className="text-xs font-black tracking-wide text-[#ffffff] block">Asset Impact Profile</span>
+          <div className="space-y-3">
+            <div className="p-3 rounded-xl bg-[#0d1117]" style={{ boxShadow: 'inset 4px 4px 8px #040609, inset -4px -4px 8px #161b22' }}>
+              <span className="text-[10px] text-[#8b949e] font-extrabold block mb-1">Population Served</span>
+              <span className="text-[#ffffff] font-extrabold text-base">{(POPULATION_WEIGHT[node.id] || 0).toLocaleString()}</span>
             </div>
-          )}
-        </section>
-
-        {/* ── Telemetry Box 2: Critical Dual Timers ── */}
-        {(isBuffering || isRepairing) && (
-          <section className="p-3.5 border border-zinc-800 bg-[#0b0b0e] space-y-3 rounded-none">
-            <div className="flex justify-between items-center text-[10px] tracking-widest uppercase text-zinc-400">
-              <span className="flex items-center gap-1.5">
-                <Clock size={12} className="text-[#FF9900]" />
-                CRITICAL TIMERS
-              </span>
-              {cityTrafficMultiplier > 1 && (
-                <span className="text-[9px] text-[#FF0033] animate-pulse">
-                  GRIDLOCK {cityTrafficMultiplier}×
-                </span>
-              )}
-            </div>
-
-            {/* Danger Timer Bar */}
-            {isBuffering && (
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] font-bold text-[#FF0033]">
-                  <span>BATTERY RESERVE DEPLETION</span>
-                  <span className="text-sm tracking-wider">{formatTimer(node.buffer)}</span>
-                </div>
-                <div className="h-1 w-full bg-zinc-900 border border-zinc-800 rounded-none overflow-hidden">
-                  <div
-                    className="h-full bg-[#FF0033] shadow-[0_0_6px_#FF0033] transition-all duration-1000"
-                    style={{ width: `${dangerRatio}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Rescue Timer Bar */}
-            {isRepairing && (
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] font-bold text-[#00E5FF]">
-                  <span>CREW EN ROUTE ETA</span>
-                  <span className="text-sm tracking-wider">{formatTimer(node.rescueTimer)}</span>
-                </div>
-                <div className="h-1 w-full bg-zinc-900 border border-zinc-800 rounded-none overflow-hidden">
-                  <div
-                    className="h-full bg-[#00E5FF] shadow-[0_0_6px_#00E5FF] transition-all duration-1000"
-                    style={{ width: `${rescueRatio}%` }}
-                  />
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* ── Telemetry Box 3: Predictive AI Triage Matrix ── */}
-        {triage && (isFailed || isBuffering) && (
-          <section className="p-3.5 border border-zinc-800 bg-[#0b0b0e] space-y-2.5 rounded-none">
-            <span className="text-[10px] tracking-widest uppercase text-zinc-400 block flex items-center gap-1.5">
-              <Activity size={12} className="text-[#00FF66]" />
-              AI FORESIGHT // TRIAGE PREDICTOR
-            </span>
-            <div className="grid grid-cols-2 gap-2 text-center text-[10px]">
-              <div className="p-2 border border-zinc-800 bg-black/60">
-                <span className="text-[8px] text-zinc-500 uppercase block">PROJECTED SAVED</span>
-                <strong className="text-base text-[#00FF66] font-bold">{triage.savedCount} ASSETS</strong>
-              </div>
-              <div className="p-2 border border-zinc-800 bg-black/60">
-                <span className="text-[8px] text-zinc-500 uppercase block">PROJECTED LOST</span>
-                <strong className="text-base text-[#FF0033] font-bold">{triage.lostCount} ASSETS</strong>
-              </div>
-            </div>
-            <div className="flex justify-between items-center text-[9px] text-zinc-400 border-t border-zinc-800 pt-2">
-              <span>PROJECTED LOSS SAVED</span>
-              <span className="text-[#00FF66] font-bold">₹{(triage.financialImpact / 100000).toFixed(1)}L SAVED</span>
-            </div>
-          </section>
-        )}
-
-        {/* ── Telemetry Box 4: Impact Metrics ── */}
-        <section className="p-3.5 border border-zinc-800 bg-[#0b0b0e] space-y-2 rounded-none">
-          <span className="text-[10px] tracking-widest uppercase text-zinc-400 block">ASSET IMPACT PROFILE</span>
-          <div className="grid grid-cols-2 gap-2 text-[10px]">
-            <div className="p-2 border border-zinc-800/80 bg-zinc-950/40">
-              <span className="text-[8px] text-zinc-500 uppercase block">POPULATION SERVED</span>
-              <span className="text-zinc-200 font-bold">{(POPULATION_WEIGHT[node.id] || 0).toLocaleString()}</span>
-            </div>
-            <div className="p-2 border border-zinc-800/80 bg-zinc-950/40">
-              <span className="text-[8px] text-zinc-500 uppercase block">ECONOMIC BURN RATE</span>
-              <span className="text-[#FF9900] font-bold">₹{((ECONOMIC_COST_PER_HOUR[node.id] || 0) / 100000).toFixed(1)}L / HR</span>
+            <div className="p-3 rounded-xl bg-[#0d1117]" style={{ boxShadow: 'inset 4px 4px 8px #040609, inset -4px -4px 8px #161b22' }}>
+              <span className="text-[10px] text-[#8b949e] font-extrabold block mb-1">Asset Function & Role</span>
+              <p className="text-[11px] leading-relaxed text-[#c9d1d9] font-normal mt-1">
+                {NODE_FUNCTIONS[node.id] || "No description available for this infrastructure asset."}
+              </p>
             </div>
           </div>
         </section>
@@ -298,50 +185,42 @@ export default function ContextPanel({ selectedNodeId, onClose }: ContextPanelPr
       </div>
 
       {/* ── Action Deck ── */}
-      <footer className="p-5 border-t border-zinc-800 bg-[#070709] space-y-2 font-mono">
-        {/* Hardware Switch Deploy Button */}
-        {restoreRemedy && (
-          <button
-            onClick={() => applyRemedy(node.id, restoreRemedy.id)}
-            disabled={!isFailed && !isBuffering}
-            className={`w-full py-3 px-4 border text-[11px] font-bold uppercase tracking-widest transition-all duration-150 rounded-none flex items-center justify-center gap-2 ${
-              (isFailed || isBuffering)
-                ? "border-[#00E5FF] text-[#00E5FF] bg-transparent hover:bg-[#00E5FF] hover:text-black hover:shadow-[0_0_15px_rgba(0,229,255,0.6)] active:scale-[0.98]"
-                : isOperational
-                ? "border-zinc-800 text-zinc-600 bg-zinc-950 cursor-not-allowed"
-                : isRepairing
-                ? "border-cyan-800 text-cyan-500 bg-cyan-950/20 cursor-wait"
-                : "border-rose-900 text-rose-500/60 bg-rose-950/20 cursor-not-allowed"
-            }`}
-          >
-            <SignalIcon size={14} />
-            {isOperational
-              ? "ASSET SECURE // NOMINAL"
-              : isRepairing
-              ? "REPAIR CREW DISPATCHED"
-              : `DEPLOY: ${restoreRemedy.label}`}
-          </button>
+      <footer className="p-5 bg-[#0d1117] space-y-3 font-sans" style={{ boxShadow: '0 -4px 8px #040609' }}>
+        {(isFailed || isBuffering) && (
+          <>
+            <span className="text-[10px] text-[#8b949e] font-extrabold uppercase block mb-1">Available Solutions</span>
+            {remedies.map((remedy) => (
+              <button
+                key={remedy.id}
+                onClick={() => applyRemedy(node.id, remedy.id)}
+                className="w-full py-2.5 px-3 text-[#58a6ff] hover:text-[#79c0ff] text-xs font-extrabold tracking-wide transition-all rounded-xl flex items-center justify-between active:scale-[0.98] bg-[#0d1117] cursor-pointer"
+                style={{ boxShadow: '4px 4px 8px #040609, -4px -4px 8px #161b22' }}
+              >
+                <div className="flex items-center gap-2">
+                  <Clock size={14} className="text-[#d29922]" />
+                  <span>{remedy.label} (+{remedy.bufferSeconds}s)</span>
+                </div>
+                <span className="text-[#3fb950] font-bold">
+                  ₹{(remedy.cost / 1000).toFixed(0)}k
+                </span>
+              </button>
+            ))}
+          </>
         )}
 
-        {/* Secondary Buffer Remedy Button */}
-        {bufferRemedy && (isFailed || isBuffering) && (
-          <button
-            onClick={() => applyRemedy(node.id, bufferRemedy.id)}
-            className="w-full py-2 px-3 border border-amber-500/50 text-amber-400 bg-amber-950/20 hover:bg-amber-500 hover:text-black text-[10px] font-bold uppercase tracking-widest transition-all rounded-none flex items-center justify-center gap-2 active:scale-[0.98]"
-          >
-            <Clock size={12} />
-            {bufferRemedy.label} (+{bufferRemedy.bufferSeconds}s)
-          </button>
+        {isOperational && (
+          <div className="py-2.5 px-3 text-center text-xs font-extrabold text-[#3fb950] bg-[#0d1e13] rounded-xl border border-[#3fb950]/20 mb-2">
+            Asset Secure // Nominal Operating Status
+          </div>
         )}
 
         {/* Manual Disruption Trigger Button */}
         {isOperational && (
           <button
             onClick={() => blastNode(node.id)}
-            className="w-full py-2 px-3 border border-rose-900/60 text-rose-400 bg-rose-950/20 hover:bg-rose-900 hover:text-white hover:border-rose-600 text-[10px] font-bold uppercase tracking-widest transition-all rounded-none flex items-center justify-center gap-2 active:scale-[0.98]"
+            className="w-full py-3.5 px-4 text-[#ffffff] text-sm font-black tracking-widest transition-all rounded-xl flex items-center justify-center active:scale-[0.97] bg-[#da3633] hover:bg-[#b82a28] shadow-[0_4px_12px_rgba(218,54,51,0.4)]"
           >
-            <Flame size={12} />
-            TRIGGER FIELD STRIKE (BLAST NODE)
+            BLAST
           </button>
         )}
       </footer>
