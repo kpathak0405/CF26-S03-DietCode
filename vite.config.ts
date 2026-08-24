@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
 
@@ -11,7 +12,8 @@ import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
 // Writes browser logs directly to files, trimmed when exceeding size limit
 // =============================================================================
 
-const PROJECT_ROOT = import.meta.dirname;
+const __filename = fileURLToPath(import.meta.url);
+const PROJECT_ROOT = path.dirname(__filename);
 const LOG_DIR = path.join(PROJECT_ROOT, ".manus-logs");
 const MAX_LOG_SIZE_BYTES = 1 * 1024 * 1024; // 1MB per log file
 const TRIM_TARGET_BYTES = Math.floor(MAX_LOG_SIZE_BYTES * 0.6); // Trim to 60% to avoid constant re-trimming
@@ -78,7 +80,7 @@ function vitePluginManusDebugCollector(): Plugin {
   return {
     name: "manus-debug-collector",
 
-    transformIndexHtml(html) {
+    transformIndexHtml(html: string) {
       if (process.env.NODE_ENV === "production") {
         return html;
       }
@@ -99,7 +101,7 @@ function vitePluginManusDebugCollector(): Plugin {
 
     configureServer(server: ViteDevServer) {
       // POST /__manus__/logs: Browser sends logs (written directly to files)
-      server.middlewares.use("/__manus__/logs", (req, res, next) => {
+      server.middlewares.use("/__manus__/logs", (req: any, res: any, next: any) => {
         if (req.method !== "POST") {
           return next();
         }
@@ -132,7 +134,7 @@ function vitePluginManusDebugCollector(): Plugin {
         }
 
         let body = "";
-        req.on("data", (chunk) => {
+        req.on("data", (chunk: any) => {
           body += chunk.toString();
         });
 
@@ -154,7 +156,7 @@ function vitePluginStorageProxy(): Plugin {
   return {
     name: "manus-storage-proxy",
     configureServer(server: ViteDevServer) {
-      server.middlewares.use("/manus-storage", async (req, res) => {
+      server.middlewares.use("/manus-storage", async (req: any, res: any) => {
         const key = req.url?.replace(/^\//, "");
         if (!key) {
           res.writeHead(400, { "Content-Type": "text/plain" });
@@ -209,15 +211,15 @@ export default defineConfig({
   plugins,
   resolve: {
     alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      "@shared": path.resolve(import.meta.dirname, "shared"),
-      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+      "@": path.resolve(PROJECT_ROOT, "client", "src"),
+      "@shared": path.resolve(PROJECT_ROOT, "shared"),
+      "@assets": path.resolve(PROJECT_ROOT, "attached_assets"),
     },
   },
-  envDir: path.resolve(import.meta.dirname),
-  root: path.resolve(import.meta.dirname, "client"),
+  envDir: path.resolve(PROJECT_ROOT),
+  root: path.resolve(PROJECT_ROOT, "client"),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: path.resolve(PROJECT_ROOT, "dist/public"),
     emptyOutDir: true,
   },
   server: {
@@ -238,4 +240,8 @@ export default defineConfig({
       deny: ["**/.*"],
     },
   },
+  optimizeDeps: {
+    exclude: ["maplibre-gl"],
+  },
 });
+

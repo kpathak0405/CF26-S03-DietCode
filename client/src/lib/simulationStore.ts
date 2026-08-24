@@ -1,11 +1,17 @@
 /**
- * Clinical Cascade Field logic: deterministic dependencies, sector-specific interventions, and selected-cost tracking.
+ * Pralayaant Simulation Engine v2
+ * ─────────────────────────────────
+ * Deterministic cascade logic with resource scarcity, dual-timer deployment races,
+ * sector-specific interventions, and a pure predictive "what-if" engine.
  */
 import { create } from "zustand";
 
-export type NodeStatus = "operational" | "buffering" | "failed" | "recovered";
+// ─── Status & Type Definitions ───────────────────────────────────────────────
+
+export type NodeStatus = "operational" | "buffering" | "repairing" | "failed" | "recovered";
 export type EdgeStatus = "operational" | "broken";
 export type RemedyEffect = "buffer" | "restore";
+export type ResourceType = "generator" | "waterTanker" | "commsSat" | "medUnit" | "crewTeam";
 
 export type InfrastructureNode = {
   id: string;
@@ -14,12 +20,26 @@ export type InfrastructureNode = {
   sector: "POWER" | "WATER" | "HEALTH" | "MOBILITY" | "COMMS" | "CIVIC";
   x: number;
   y: number;
+  lng: number;
+  lat: number;
   baseBuffer: number;
   buffer: number;
   status: NodeStatus;
+  /** Seconds remaining until rescue crew arrives. 0 = no active deployment. */
+  rescueTimer: number;
+  /** Max rescue time for this node (used to calculate progress bar width). */
+  maxRescueTime: number;
+  /** Which resource was committed to this node, if any. */
+  deployedResource: ResourceType | null;
 };
 
-export type DependencyEdge = { id: string; source: string; target: string; label: string; status: EdgeStatus };
+export type DependencyEdge = {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  status: EdgeStatus;
+};
 
 export type RemedyOption = {
   id: string;
@@ -48,6 +68,74 @@ export type DisasterPreset = {
   brokenEdgeIds: string[];
 };
 
+export type InventorySlot = {
+  label: string;
+  available: number;
+  max: number;
+};
+
+export type CityInventory = Record<ResourceType, InventorySlot>;
+
+export type TriagePrediction = {
+  savedCount: number;
+  lostCount: number;
+  impactScore: number;
+  affectedNodeIds: string[];
+};
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+/** Which resource type each node requires for a "restore" remedy deployment. */
+const RESOURCE_MAPPING: Record<string, ResourceType> = {
+  "power-substation": "generator",
+  "water-treatment": "waterTanker",
+  "telecom-exchange": "commsSat",
+  "metro-signals": "generator",
+  "booster-pumps": "waterTanker",
+  "hospital-icu": "medUnit",
+  "emergency-dispatch": "crewTeam",
+  "fire-station": "crewTeam",
+};
+
+/** How long (in seconds) rescue takes for each node. */
+const RESCUE_TIMES: Record<string, number> = {
+  "power-substation": 20,
+  "water-treatment": 15,
+  "telecom-exchange": 12,
+  "metro-signals": 18,
+  "booster-pumps": 14,
+  "hospital-icu": 10,
+  "emergency-dispatch": 16,
+  "fire-station": 22,
+};
+
+/** Population weight for impact scoring in the triage predictor. */
+export const POPULATION_WEIGHT: Record<string, number> = {
+  "power-substation": 120000,
+  "water-treatment": 85000,
+  "telecom-exchange": 60000,
+  "metro-signals": 40000,
+  "booster-pumps": 30000,
+  "hospital-icu": 50000,
+  "emergency-dispatch": 35000,
+  "fire-station": 25000,
+};
+
+const INITIAL_INVENTORY: CityInventory = {
+  generator: { label: "Generators", available: 2, max: 2 },
+  waterTanker: { label: "Water Tankers", available: 3, max: 3 },
+  commsSat: { label: "Comms Satellites", available: 1, max: 1 },
+  medUnit: { label: "Medical Units", available: 2, max: 2 },
+  crewTeam: { label: "Crew Teams", available: 3, max: 3 },
+};
+
+const cloneInventory = (): CityInventory =>
+  Object.fromEntries(
+    Object.entries(INITIAL_INVENTORY).map(([key, slot]) => [key, { ...slot }]),
+  ) as CityInventory;
+
+// ─── Node & Edge Data ────────────────────────────────────────────────────────
+
 const BASE_DEPENDENCY_EDGES: DependencyEdge[] = [
   { id: "e-power-water", source: "power-substation", target: "water-treatment", label: "grid feed", status: "operational" },
   { id: "e-power-comms", source: "power-substation", target: "telecom-exchange", label: "grid feed", status: "operational" },
@@ -62,14 +150,14 @@ const BASE_DEPENDENCY_EDGES: DependencyEdge[] = [
 ];
 
 const INITIAL_NODES: InfrastructureNode[] = [
-  { id: "power-substation", assetId: "PWR-01", label: "Power Substation", sector: "POWER", x: 95, y: 360, baseBuffer: 0, buffer: 0, status: "operational" },
-  { id: "water-treatment", assetId: "WTR-11", label: "Water Treatment", sector: "WATER", x: 390, y: 90, baseBuffer: 55, buffer: 55, status: "operational" },
-  { id: "telecom-exchange", assetId: "COM-07", label: "Telecom Exchange", sector: "COMMS", x: 320, y: 555, baseBuffer: 65, buffer: 65, status: "operational" },
-  { id: "metro-signals", assetId: "MOB-03", label: "Metro Signal Grid", sector: "MOBILITY", x: 145, y: 705, baseBuffer: 40, buffer: 40, status: "operational" },
-  { id: "booster-pumps", assetId: "WTR-14", label: "Booster Pumps", sector: "WATER", x: 735, y: 180, baseBuffer: 35, buffer: 35, status: "operational" },
-  { id: "hospital-icu", assetId: "HLT-02", label: "Hospital ICU", sector: "HEALTH", x: 670, y: 405, baseBuffer: 80, buffer: 80, status: "operational" },
-  { id: "emergency-dispatch", assetId: "CIV-09", label: "Emergency Dispatch", sector: "CIVIC", x: 1075, y: 245, baseBuffer: 60, buffer: 60, status: "operational" },
-  { id: "fire-station", assetId: "CIV-21", label: "Fire Station 7", sector: "CIVIC", x: 915, y: 650, baseBuffer: 45, buffer: 45, status: "operational" },
+  { id: "power-substation", assetId: "PWR-01", label: "Power Substation", sector: "POWER", x: 95, y: 360, lng: 79.0305, lat: 21.1302, baseBuffer: 0, buffer: 0, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "water-treatment", assetId: "WTR-11", label: "Water Treatment", sector: "WATER", x: 390, y: 90, lng: 79.0432, lat: 21.1824, baseBuffer: 55, buffer: 55, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "telecom-exchange", assetId: "COM-07", label: "Telecom Exchange", sector: "COMMS", x: 320, y: 555, lng: 79.0768, lat: 21.1534, baseBuffer: 65, buffer: 65, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "metro-signals", assetId: "MOB-03", label: "Metro Signal Grid", sector: "MOBILITY", x: 145, y: 705, lng: 79.0831, lat: 21.1448, baseBuffer: 40, buffer: 40, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "booster-pumps", assetId: "WTR-14", label: "Booster Pumps", sector: "WATER", x: 735, y: 180, lng: 79.0634, lat: 21.1685, baseBuffer: 35, buffer: 35, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "hospital-icu", assetId: "HLT-02", label: "Hospital ICU", sector: "HEALTH", x: 670, y: 405, lng: 79.0984, lat: 21.1278, baseBuffer: 80, buffer: 80, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "emergency-dispatch", assetId: "CIV-09", label: "Emergency Dispatch", sector: "CIVIC", x: 1075, y: 245, lng: 79.0792, lat: 21.1561, baseBuffer: 60, buffer: 60, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "fire-station", assetId: "CIV-21", label: "Fire Station 7", sector: "CIVIC", x: 915, y: 650, lng: 79.1025, lat: 21.1472, baseBuffer: 45, buffer: 45, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
 ];
 
 export const REMEDIES_BY_NODE: Record<string, RemedyOption[]> = {
@@ -114,26 +202,45 @@ export const DISASTER_PRESETS: DisasterPreset[] = [
   { id: "seismic-corridor", code: "X-04", label: "Seismic corridor", effect: "compound strike", failedNodeIds: ["power-substation"], brokenEdgeIds: ["e-water-hospital"] },
 ];
 
-const cloneInitialNodes = () => INITIAL_NODES.map((node) => ({ ...node }));
-const cloneInitialEdges = () => BASE_DEPENDENCY_EDGES.map((edge) => ({ ...edge }));
-const incomingEdgesFor = (nodeId: string, edges: DependencyEdge[]) => edges.filter((edge) => edge.target === nodeId);
-const childIdsFor = (nodeId: string) => BASE_DEPENDENCY_EDGES.filter((edge) => edge.source === nodeId).map((edge) => edge.target);
+// ─── Graph Helpers ───────────────────────────────────────────────────────────
+
+const cloneInitialNodes = (): InfrastructureNode[] => INITIAL_NODES.map((node) => ({ ...node }));
+const cloneInitialEdges = (): DependencyEdge[] => BASE_DEPENDENCY_EDGES.map((edge) => ({ ...edge }));
+
+const incomingEdgesFor = (nodeId: string, edges: DependencyEdge[]) =>
+  edges.filter((edge) => edge.target === nodeId);
+
+const childIdsFor = (nodeId: string) =>
+  BASE_DEPENDENCY_EDGES.filter((edge) => edge.source === nodeId).map((edge) => edge.target);
 
 const hasIncomingDisruption = (node: InfrastructureNode, nodes: InfrastructureNode[], edges: DependencyEdge[]) =>
-  incomingEdgesFor(node.id, edges).some((edge) => edge.status === "broken" || nodes.find((candidate) => candidate.id === edge.source)?.status === "failed");
+  incomingEdgesFor(node.id, edges).some(
+    (edge) => edge.status === "broken" || nodes.find((n) => n.id === edge.source)?.status === "failed",
+  );
 
+/**
+ * Recalculate dependent node statuses after a topology change.
+ * Nodes that are failed, recovered, or repairing are left alone.
+ */
 const recalculateDependents = (nodes: InfrastructureNode[], edges: DependencyEdge[]): InfrastructureNode[] =>
   nodes.map<InfrastructureNode>((node) => {
-    if (node.status === "failed" || node.status === "recovered") return node;
+    if (node.status === "failed" || node.status === "recovered" || node.status === "repairing") return node;
     const isDisrupted = hasIncomingDisruption(node, nodes, edges);
-    if (isDisrupted && node.status === "operational") return { ...node, status: "buffering", buffer: node.baseBuffer };
-    if (!isDisrupted && node.status === "buffering") return { ...node, status: "operational", buffer: node.baseBuffer };
+    if (isDisrupted && node.status === "operational") {
+      return { ...node, status: "buffering", buffer: node.baseBuffer };
+    }
+    if (!isDisrupted && node.status === "buffering") {
+      return { ...node, status: "operational", buffer: node.baseBuffer };
+    }
     return node;
   });
+
+// ─── Store Type ──────────────────────────────────────────────────────────────
 
 type SimulationState = {
   nodes: InfrastructureNode[];
   edges: DependencyEdge[];
+  inventory: CityInventory;
   activePresetId: DisasterPreset["id"] | null;
   selectedRemedies: AppliedRemedy[];
   tick: () => void;
@@ -145,55 +252,242 @@ type SimulationState = {
   reset: () => void;
 };
 
+// ─── Store Implementation ────────────────────────────────────────────────────
+
 export const useSimulationStore = create<SimulationState>((set) => ({
   nodes: cloneInitialNodes(),
   edges: cloneInitialEdges(),
+  inventory: cloneInventory(),
   activePresetId: null,
   selectedRemedies: [],
-  tick: () => set((state) => {
-    const ticked = state.nodes.map<InfrastructureNode>((node) => {
-      if (node.status !== "buffering") return node;
-      const nextBuffer = Math.max(0, node.buffer - 1);
-      return nextBuffer === 0 ? { ...node, status: "failed", buffer: 0 } : { ...node, buffer: nextBuffer };
-    });
-    return { nodes: recalculateDependents(ticked, state.edges) };
-  }),
-  blastNode: (nodeId) => set((state) => {
-    const failed = state.nodes.map<InfrastructureNode>((node) => node.id === nodeId ? { ...node, status: "failed", buffer: 0 } : node);
-    return { nodes: recalculateDependents(failed, state.edges), activePresetId: null };
-  }),
-  applyRemedy: (nodeId, remedyId) => set((state) => {
-    const target = state.nodes.find((node) => node.id === nodeId);
-    const remedy = REMEDIES_BY_NODE[nodeId]?.find((candidate) => candidate.id === remedyId);
-    if (!target || !remedy || (target.status !== "buffering" && target.status !== "failed")) return {};
-    const updatedNodes = state.nodes.map<InfrastructureNode>((node) => {
-      if (node.id !== nodeId) return node;
-      if (remedy.effect === "restore") return { ...node, status: "recovered", buffer: 0 };
-      return { ...node, status: "buffering", buffer: Math.max(node.buffer, 0) + (remedy.bufferSeconds ?? 0) };
-    });
-    const applied: AppliedRemedy = { nodeId, assetId: target.assetId, nodeLabel: target.label, sector: target.sector, remedyId: remedy.id, remedyLabel: remedy.label, cost: remedy.cost };
-    return { nodes: recalculateDependents(updatedNodes, state.edges), selectedRemedies: [...state.selectedRemedies.filter((item) => item.nodeId !== nodeId), applied], activePresetId: null };
-  }),
-  breakEdge: (edgeId) => set((state) => {
-    const edges = state.edges.map((edge) => edge.id === edgeId ? { ...edge, status: "broken" as EdgeStatus } : edge);
-    return { edges, nodes: recalculateDependents(state.nodes, edges), activePresetId: null };
-  }),
-  repairEdge: (edgeId) => set((state) => {
-    const edges = state.edges.map((edge) => edge.id === edgeId ? { ...edge, status: "operational" as EdgeStatus } : edge);
-    return { edges, nodes: recalculateDependents(state.nodes, edges), activePresetId: null };
-  }),
-  applyPreset: (presetId) => set(() => {
-    const preset = DISASTER_PRESETS.find((candidate) => candidate.id === presetId);
-    if (!preset) return { nodes: cloneInitialNodes(), edges: cloneInitialEdges(), activePresetId: null, selectedRemedies: [] };
-    const edges = cloneInitialEdges().map((edge) => preset.brokenEdgeIds.includes(edge.id) ? { ...edge, status: "broken" as EdgeStatus } : edge);
-    const seededNodes = cloneInitialNodes().map<InfrastructureNode>((node) => preset.failedNodeIds.includes(node.id) ? { ...node, status: "failed", buffer: 0 } : node);
-    return { edges, nodes: recalculateDependents(seededNodes, edges), activePresetId: preset.id, selectedRemedies: [] };
-  }),
-  reset: () => set({ nodes: cloneInitialNodes(), edges: cloneInitialEdges(), activePresetId: null, selectedRemedies: [] }),
+
+  // ── The Dual-Timer Tick Loop ────────────────────────────────────────────
+  tick: () =>
+    set((state) => {
+      let inventoryChanged = false;
+      const newInventory = { ...state.inventory };
+      // Clone each slot so we can mutate safely
+      for (const key of Object.keys(newInventory) as ResourceType[]) {
+        newInventory[key] = { ...newInventory[key] };
+      }
+
+      const ticked = state.nodes.map<InfrastructureNode>((node) => {
+        // ── REPAIRING: both timers race ──────────────────────────────────
+        if (node.status === "repairing") {
+          const nextBuffer = Math.max(0, node.buffer - 1);
+          const nextRescue = Math.max(0, node.rescueTimer - 1);
+
+          // RESCUE WINS: truck arrived before battery died
+          if (nextRescue <= 0) {
+            return {
+              ...node,
+              status: "recovered",
+              buffer: 0,
+              rescueTimer: 0,
+              // keep deployedResource so we know it's committed
+            };
+          }
+
+          // DANGER WINS: battery died while truck was still in transit
+          if (nextBuffer <= 0) {
+            // Resource is WASTED — do NOT return it to inventory
+            return {
+              ...node,
+              status: "failed",
+              buffer: 0,
+              rescueTimer: 0,
+              deployedResource: null,
+            };
+          }
+
+          // Both still counting down
+          return { ...node, buffer: nextBuffer, rescueTimer: nextRescue };
+        }
+
+        // ── BUFFERING: danger timer only ─────────────────────────────────
+        if (node.status === "buffering") {
+          const nextBuffer = Math.max(0, node.buffer - 1);
+          if (nextBuffer <= 0) {
+            return { ...node, status: "failed", buffer: 0 };
+          }
+          return { ...node, buffer: nextBuffer };
+        }
+
+        return node;
+      });
+
+      const result: Partial<SimulationState> = {
+        nodes: recalculateDependents(ticked, state.edges),
+      };
+
+      if (inventoryChanged) {
+        result.inventory = newInventory;
+      }
+
+      return result;
+    }),
+
+  // ── Blast / Fail a Node ─────────────────────────────────────────────────
+  blastNode: (nodeId) =>
+    set((state) => {
+      const node = state.nodes.find((n) => n.id === nodeId);
+      const newInventory = { ...state.inventory };
+      for (const key of Object.keys(newInventory) as ResourceType[]) {
+        newInventory[key] = { ...newInventory[key] };
+      }
+
+      // If the node was repairing, the deployed resource is lost (wasted)
+      // We do NOT return it to inventory — the truck was en route to a node that just exploded
+
+      const failed = state.nodes.map<InfrastructureNode>((n) =>
+        n.id === nodeId
+          ? { ...n, status: "failed", buffer: 0, rescueTimer: 0, deployedResource: null }
+          : n,
+      );
+
+      // If the blasted node had a deployed resource and was repairing, resource is wasted
+      // (already null'd above, inventory stays depleted)
+
+      return {
+        nodes: recalculateDependents(failed, state.edges),
+        inventory: newInventory,
+        activePresetId: null,
+      };
+    }),
+
+  // ── Apply Remedy (with inventory & deployment delay) ────────────────────
+  applyRemedy: (nodeId, remedyId) =>
+    set((state) => {
+      const target = state.nodes.find((n) => n.id === nodeId);
+      const remedy = REMEDIES_BY_NODE[nodeId]?.find((r) => r.id === remedyId);
+      if (!target || !remedy) return {};
+      if (target.status !== "buffering" && target.status !== "failed") return {};
+
+      const newInventory = { ...state.inventory };
+      for (const key of Object.keys(newInventory) as ResourceType[]) {
+        newInventory[key] = { ...newInventory[key] };
+      }
+
+      let updatedNodes: InfrastructureNode[];
+
+      if (remedy.effect === "restore") {
+        // ── RESTORE: costs a resource, triggers deployment delay ────────
+        const resourceType = RESOURCE_MAPPING[nodeId];
+        if (!resourceType) return {};
+
+        const slot = newInventory[resourceType];
+        if (slot.available <= 0) return {}; // Out of stock!
+
+        // Deduct from inventory
+        slot.available -= 1;
+
+        const rescueTime = RESCUE_TIMES[nodeId] ?? 15;
+
+        updatedNodes = state.nodes.map<InfrastructureNode>((n) => {
+          if (n.id !== nodeId) return n;
+          return {
+            ...n,
+            status: "repairing",
+            buffer: n.status === "failed" ? n.baseBuffer : n.buffer, // if failed, give them full buffer as "emergency restart"
+            rescueTimer: rescueTime,
+            maxRescueTime: rescueTime,
+            deployedResource: resourceType,
+          };
+        });
+      } else {
+        // ── BUFFER: instant, no resource cost ──────────────────────────
+        updatedNodes = state.nodes.map<InfrastructureNode>((n) => {
+          if (n.id !== nodeId) return n;
+          return {
+            ...n,
+            status: "buffering",
+            buffer: Math.max(n.buffer, 0) + (remedy.bufferSeconds ?? 0),
+          };
+        });
+      }
+
+      const applied: AppliedRemedy = {
+        nodeId,
+        assetId: target.assetId,
+        nodeLabel: target.label,
+        sector: target.sector,
+        remedyId: remedy.id,
+        remedyLabel: remedy.label,
+        cost: remedy.cost,
+      };
+
+      return {
+        nodes: recalculateDependents(updatedNodes, state.edges),
+        inventory: newInventory,
+        selectedRemedies: [
+          ...state.selectedRemedies.filter((item) => item.nodeId !== nodeId),
+          applied,
+        ],
+        activePresetId: null,
+      };
+    }),
+
+  // ── Break / Repair Edges ────────────────────────────────────────────────
+  breakEdge: (edgeId) =>
+    set((state) => {
+      const edges = state.edges.map((edge) =>
+        edge.id === edgeId ? { ...edge, status: "broken" as EdgeStatus } : edge,
+      );
+      return { edges, nodes: recalculateDependents(state.nodes, edges), activePresetId: null };
+    }),
+
+  repairEdge: (edgeId) =>
+    set((state) => {
+      const edges = state.edges.map((edge) =>
+        edge.id === edgeId ? { ...edge, status: "operational" as EdgeStatus } : edge,
+      );
+      return { edges, nodes: recalculateDependents(state.nodes, edges), activePresetId: null };
+    }),
+
+  // ── Presets & Reset ─────────────────────────────────────────────────────
+  applyPreset: (presetId) =>
+    set(() => {
+      const preset = DISASTER_PRESETS.find((p) => p.id === presetId);
+      if (!preset) {
+        return {
+          nodes: cloneInitialNodes(),
+          edges: cloneInitialEdges(),
+          inventory: cloneInventory(),
+          activePresetId: null,
+          selectedRemedies: [],
+        };
+      }
+      const edges = cloneInitialEdges().map((edge) =>
+        preset.brokenEdgeIds.includes(edge.id) ? { ...edge, status: "broken" as EdgeStatus } : edge,
+      );
+      const seededNodes = cloneInitialNodes().map<InfrastructureNode>((node) =>
+        preset.failedNodeIds.includes(node.id) ? { ...node, status: "failed", buffer: 0 } : node,
+      );
+      return {
+        edges,
+        nodes: recalculateDependents(seededNodes, edges),
+        inventory: cloneInventory(),
+        activePresetId: preset.id,
+        selectedRemedies: [],
+      };
+    }),
+
+  reset: () =>
+    set({
+      nodes: cloneInitialNodes(),
+      edges: cloneInitialEdges(),
+      inventory: cloneInventory(),
+      activePresetId: null,
+      selectedRemedies: [],
+    }),
 }));
+
+// ─── Selectors & Helpers ─────────────────────────────────────────────────────
 
 export const getRemediesForNode = (nodeId: string) => REMEDIES_BY_NODE[nodeId] ?? [];
 export const getNodeOutDegree = (nodeId: string) => childIdsFor(nodeId).length;
+export const getResourceForNode = (nodeId: string): ResourceType | null => RESOURCE_MAPPING[nodeId] ?? null;
+export const getRescueTimeForNode = (nodeId: string): number => RESCUE_TIMES[nodeId] ?? 15;
 
 export const getDownstreamNodeIds = (nodeId: string) => {
   const discovered = new Set<string>();
@@ -207,4 +501,109 @@ export const getDownstreamNodeIds = (nodeId: string) => {
   return Array.from(discovered);
 };
 
-export const getStatusLabel = (status: NodeStatus) => ({ operational: "Operational", buffering: "Buffering", failed: "Failed", recovered: "Recovered" })[status];
+export const getStatusLabel = (status: NodeStatus) =>
+  ({ operational: "Operational", buffering: "Buffering", repairing: "Deploying", failed: "Failed", recovered: "Recovered" })[status];
+
+// ─── The "What-If" Predictive Engine ─────────────────────────────────────────
+
+/**
+ * Pure simulation function that predicts the outcome of deploying to a specific node.
+ * Does NOT touch the live game state — operates entirely on cloned data.
+ *
+ * @param targetNodeId - The node we pretend to deploy our resource to
+ * @param currentNodes - Current live node state (will be deep-cloned)
+ * @param currentEdges - Current live edge state (will be deep-cloned)
+ * @returns Prediction with savedCount, lostCount, impactScore, and affected node IDs
+ */
+export function simulateOutcome(
+  targetNodeId: string,
+  currentNodes: InfrastructureNode[],
+  currentEdges: DependencyEdge[],
+): TriagePrediction {
+  // Deep-clone state
+  let simNodes = currentNodes.map((n) => ({ ...n }));
+  const simEdges = currentEdges.map((e) => ({ ...e }));
+
+  // Pretend we deploy to the target node
+  const rescueTime = RESCUE_TIMES[targetNodeId] ?? 15;
+  simNodes = simNodes.map((n) => {
+    if (n.id !== targetNodeId) return n;
+    return {
+      ...n,
+      status: "repairing" as NodeStatus,
+      buffer: n.status === "failed" ? n.baseBuffer : n.buffer,
+      rescueTimer: rescueTime,
+      maxRescueTime: rescueTime,
+    };
+  });
+
+  // Record which nodes are currently at-risk (not operational or recovered)
+  const atRiskBefore = new Set(
+    currentNodes
+      .filter((n) => n.status === "buffering" || n.status === "repairing" || n.status === "failed")
+      .map((n) => n.id),
+  );
+
+  // Fast-forward the simulation to completion (max 300 ticks)
+  const MAX_TICKS = 300;
+  for (let t = 0; t < MAX_TICKS; t++) {
+    let anyActive = false;
+
+    simNodes = simNodes.map((node) => {
+      if (node.status === "repairing") {
+        anyActive = true;
+        const nextBuffer = Math.max(0, node.buffer - 1);
+        const nextRescue = Math.max(0, node.rescueTimer - 1);
+
+        if (nextRescue <= 0) {
+          return { ...node, status: "recovered" as NodeStatus, buffer: 0, rescueTimer: 0 };
+        }
+        if (nextBuffer <= 0) {
+          return { ...node, status: "failed" as NodeStatus, buffer: 0, rescueTimer: 0, deployedResource: null };
+        }
+        return { ...node, buffer: nextBuffer, rescueTimer: nextRescue };
+      }
+
+      if (node.status === "buffering") {
+        anyActive = true;
+        const nextBuffer = Math.max(0, node.buffer - 1);
+        if (nextBuffer <= 0) {
+          return { ...node, status: "failed" as NodeStatus, buffer: 0 };
+        }
+        return { ...node, buffer: nextBuffer };
+      }
+
+      return node;
+    });
+
+    // Propagate cascade
+    simNodes = recalculateDependents(simNodes, simEdges);
+
+    if (!anyActive) break;
+  }
+
+  // Analyze results
+  const savedNodes: string[] = [];
+  const lostNodes: string[] = [];
+  let impactScore = 0;
+
+  for (const node of simNodes) {
+    const weight = POPULATION_WEIGHT[node.id] ?? 10000;
+
+    if (node.status === "recovered" || node.status === "operational") {
+      if (atRiskBefore.has(node.id)) {
+        savedNodes.push(node.id);
+      }
+    } else if (node.status === "failed") {
+      lostNodes.push(node.id);
+      impactScore += weight;
+    }
+  }
+
+  return {
+    savedCount: savedNodes.length,
+    lostCount: lostNodes.length,
+    impactScore,
+    affectedNodeIds: lostNodes,
+  };
+}
