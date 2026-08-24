@@ -1,8 +1,9 @@
 /**
- * Pralayaant Simulation Engine v2
+ * Pralayaant Simulation Engine v3
  * ─────────────────────────────────
  * Deterministic cascade logic with resource scarcity, dual-timer deployment races,
- * sector-specific interventions, and a pure predictive "what-if" engine.
+ * sector-specific interventions, load redistribution overload, traffic ripple delays,
+ * live impact analytics, reproducible scenarios, and a pure predictive "what-if" engine.
  */
 import { create } from "zustand";
 
@@ -31,6 +32,10 @@ export type InfrastructureNode = {
   maxRescueTime: number;
   /** Which resource was committed to this node, if any. */
   deployedResource: ResourceType | null;
+  /** Maximum operational capacity (MW, kL/hr, Gbps — abstract units). */
+  capacity: number;
+  /** Current operational load — if currentLoad > capacity, node overheats. */
+  currentLoad: number;
 };
 
 export type DependencyEdge = {
@@ -60,7 +65,7 @@ export type AppliedRemedy = {
 };
 
 export type DisasterPreset = {
-  id: "substation-flashover" | "water-main-rupture" | "telecom-blackout" | "seismic-corridor";
+  id: "substation-flashover" | "water-main-rupture" | "telecom-blackout" | "seismic-corridor" | "monsoon-flood" | "cyber-attack";
   code: string;
   label: string;
   effect: string;
@@ -81,6 +86,10 @@ export type TriagePrediction = {
   lostCount: number;
   impactScore: number;
   affectedNodeIds: string[];
+  /** Estimated ₹ lost over the simulated future. */
+  financialImpact: number;
+  /** Max depth of the failure cascade chain. */
+  cascadeDepth: number;
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -97,7 +106,7 @@ const RESOURCE_MAPPING: Record<string, ResourceType> = {
   "fire-station": "crewTeam",
 };
 
-/** How long (in seconds) rescue takes for each node. */
+/** How long (in seconds) rescue takes for each node (base time, before traffic multiplier). */
 const RESCUE_TIMES: Record<string, number> = {
   "power-substation": 20,
   "water-treatment": 15,
@@ -119,6 +128,18 @@ export const POPULATION_WEIGHT: Record<string, number> = {
   "hospital-icu": 50000,
   "emergency-dispatch": 35000,
   "fire-station": 25000,
+};
+
+/** Economic cost per hour when each node is offline (₹). */
+export const ECONOMIC_COST_PER_HOUR: Record<string, number> = {
+  "power-substation": 5000000,
+  "water-treatment": 2500000,
+  "telecom-exchange": 3500000,
+  "metro-signals": 1800000,
+  "booster-pumps": 800000,
+  "hospital-icu": 4200000,
+  "emergency-dispatch": 1500000,
+  "fire-station": 900000,
 };
 
 const INITIAL_INVENTORY: CityInventory = {
@@ -150,14 +171,14 @@ const BASE_DEPENDENCY_EDGES: DependencyEdge[] = [
 ];
 
 const INITIAL_NODES: InfrastructureNode[] = [
-  { id: "power-substation", assetId: "PWR-01", label: "Power Substation", sector: "POWER", x: 95, y: 360, lng: 79.0305, lat: 21.1302, baseBuffer: 0, buffer: 0, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "water-treatment", assetId: "WTR-11", label: "Water Treatment", sector: "WATER", x: 390, y: 90, lng: 79.0432, lat: 21.1824, baseBuffer: 55, buffer: 55, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "telecom-exchange", assetId: "COM-07", label: "Telecom Exchange", sector: "COMMS", x: 320, y: 555, lng: 79.0768, lat: 21.1534, baseBuffer: 65, buffer: 65, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "metro-signals", assetId: "MOB-03", label: "Metro Signal Grid", sector: "MOBILITY", x: 145, y: 705, lng: 79.0831, lat: 21.1448, baseBuffer: 40, buffer: 40, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "booster-pumps", assetId: "WTR-14", label: "Booster Pumps", sector: "WATER", x: 735, y: 180, lng: 79.0634, lat: 21.1685, baseBuffer: 35, buffer: 35, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "hospital-icu", assetId: "HLT-02", label: "Hospital ICU", sector: "HEALTH", x: 670, y: 405, lng: 79.0984, lat: 21.1278, baseBuffer: 80, buffer: 80, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "emergency-dispatch", assetId: "CIV-09", label: "Emergency Dispatch", sector: "CIVIC", x: 1075, y: 245, lng: 79.0792, lat: 21.1561, baseBuffer: 60, buffer: 60, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "fire-station", assetId: "CIV-21", label: "Fire Station 7", sector: "CIVIC", x: 915, y: 650, lng: 79.1025, lat: 21.1472, baseBuffer: 45, buffer: 45, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "power-substation", assetId: "PWR-01", label: "Power Substation", sector: "POWER", x: 95, y: 360, lng: 79.0305, lat: 21.1302, baseBuffer: 0, buffer: 0, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 100, currentLoad: 82 },
+  { id: "water-treatment", assetId: "WTR-11", label: "Water Treatment", sector: "WATER", x: 390, y: 90, lng: 79.0432, lat: 21.1824, baseBuffer: 55, buffer: 55, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 80, currentLoad: 58 },
+  { id: "telecom-exchange", assetId: "COM-07", label: "Telecom Exchange", sector: "COMMS", x: 320, y: 555, lng: 79.0768, lat: 21.1534, baseBuffer: 65, buffer: 65, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 70, currentLoad: 52 },
+  { id: "metro-signals", assetId: "MOB-03", label: "Metro Signal Grid", sector: "MOBILITY", x: 145, y: 705, lng: 79.0831, lat: 21.1448, baseBuffer: 40, buffer: 40, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 60, currentLoad: 45 },
+  { id: "booster-pumps", assetId: "WTR-14", label: "Booster Pumps", sector: "WATER", x: 735, y: 180, lng: 79.0634, lat: 21.1685, baseBuffer: 35, buffer: 35, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 50, currentLoad: 38 },
+  { id: "hospital-icu", assetId: "HLT-02", label: "Hospital ICU", sector: "HEALTH", x: 670, y: 405, lng: 79.0984, lat: 21.1278, baseBuffer: 80, buffer: 80, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 90, currentLoad: 74 },
+  { id: "emergency-dispatch", assetId: "CIV-09", label: "Emergency Dispatch", sector: "CIVIC", x: 1075, y: 245, lng: 79.0792, lat: 21.1561, baseBuffer: 60, buffer: 60, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 65, currentLoad: 50 },
+  { id: "fire-station", assetId: "CIV-21", label: "Fire Station 7", sector: "CIVIC", x: 915, y: 650, lng: 79.1025, lat: 21.1472, baseBuffer: 45, buffer: 45, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 55, currentLoad: 42 },
 ];
 
 export const REMEDIES_BY_NODE: Record<string, RemedyOption[]> = {
@@ -200,6 +221,8 @@ export const DISASTER_PRESETS: DisasterPreset[] = [
   { id: "water-main-rupture", code: "W-02", label: "Water main rupture", effect: "2 routes lost", failedNodeIds: [], brokenEdgeIds: ["e-water-pumps", "e-water-hospital"] },
   { id: "telecom-blackout", code: "C-03", label: "Telecom blackout", effect: "relay outage", failedNodeIds: ["telecom-exchange"], brokenEdgeIds: [] },
   { id: "seismic-corridor", code: "X-04", label: "Seismic corridor", effect: "compound strike", failedNodeIds: ["power-substation"], brokenEdgeIds: ["e-water-hospital"] },
+  { id: "monsoon-flood", code: "F-05", label: "2026 Monsoon Flood", effect: "multi-sector", failedNodeIds: ["booster-pumps", "metro-signals"], brokenEdgeIds: ["e-water-pumps", "e-pumps-fire"] },
+  { id: "cyber-attack", code: "C-06", label: "Cyber Attack", effect: "comms blackout", failedNodeIds: ["telecom-exchange"], brokenEdgeIds: ["e-comms-hospital", "e-comms-dispatch"] },
 ];
 
 // ─── Graph Helpers ───────────────────────────────────────────────────────────
@@ -235,6 +258,127 @@ const recalculateDependents = (nodes: InfrastructureNode[], edges: DependencyEdg
     return node;
   });
 
+// ─── Traffic Ripple Effect ───────────────────────────────────────────────────
+
+/**
+ * Computes the city-wide traffic delay multiplier.
+ * If a critical transit/power node is FAILED → 2.5× gridlock.
+ * If buffering/repairing → 1.5× congestion.
+ */
+const computeTrafficMultiplier = (nodes: InfrastructureNode[]): number => {
+  const power = nodes.find((n) => n.id === "power-substation");
+  const metro = nodes.find((n) => n.id === "metro-signals");
+  if (power?.status === "failed" || metro?.status === "failed") return 2.5;
+  if (
+    power?.status === "buffering" || power?.status === "repairing" ||
+    metro?.status === "buffering" || metro?.status === "repairing"
+  ) return 1.5;
+  return 1.0;
+};
+
+// ─── Cascade Depth Calculator ────────────────────────────────────────────────
+
+/**
+ * Computes the maximum cascade depth: longest chain from a root failure
+ * to any downstream affected node.
+ */
+const computeCascadeDepth = (nodes: InfrastructureNode[], edges: DependencyEdge[]): number => {
+  const nonOp = new Set(
+    nodes
+      .filter((n) => n.status !== "operational" && n.status !== "recovered")
+      .map((n) => n.id),
+  );
+  if (nonOp.size === 0) return 0;
+
+  let maxDepth = 0;
+  for (const node of nodes) {
+    if (!nonOp.has(node.id)) continue;
+    // Is this a root? (no non-operational parent)
+    const parentIds = edges.filter((e) => e.target === node.id).map((e) => e.source);
+    const isRoot = parentIds.length === 0 || parentIds.every((p) => !nonOp.has(p));
+    if (!isRoot) continue;
+
+    const queue: [string, number][] = [[node.id, 1]];
+    const visited = new Set([node.id]);
+    while (queue.length) {
+      const [id, depth] = queue.shift()!;
+      maxDepth = Math.max(maxDepth, depth);
+      for (const edge of edges) {
+        if (edge.source === id && !visited.has(edge.target) && nonOp.has(edge.target)) {
+          visited.add(edge.target);
+          queue.push([edge.target, depth + 1]);
+        }
+      }
+    }
+  }
+  return maxDepth;
+};
+
+// ─── Overload Redistribution Helper ──────────────────────────────────────────
+
+/**
+ * When nodes fail, redistribute their load to sibling nodes
+ * (other targets of the same parents in the dependency graph).
+ * If a sibling exceeds capacity, it enters an overload buffering state.
+ */
+const applyOverloadRedistribution = (
+  nodes: InfrastructureNode[],
+  edges: DependencyEdge[],
+  newlyFailedIds: string[],
+): InfrastructureNode[] => {
+  if (newlyFailedIds.length === 0) return nodes;
+
+  const loadMap = new Map(nodes.map((n) => [n.id, n.currentLoad]));
+
+  for (const failedId of newlyFailedIds) {
+    const failedLoad = loadMap.get(failedId) ?? 0;
+    if (failedLoad <= 0) continue;
+
+    // Find parents (upstream sources)
+    const parentIds = edges
+      .filter((e) => e.target === failedId)
+      .map((e) => e.source);
+
+    // Find siblings: other targets of the same parents
+    const siblingIds = new Set<string>();
+    for (const pid of parentIds) {
+      edges
+        .filter((e) => e.source === pid && e.target !== failedId)
+        .forEach((e) => siblingIds.add(e.target));
+    }
+
+    const activeSiblingIds = Array.from(siblingIds).filter((sid) => {
+      const sib = nodes.find((n) => n.id === sid);
+      return sib && sib.status !== "failed";
+    });
+
+    if (activeSiblingIds.length > 0) {
+      const loadShare = failedLoad / activeSiblingIds.length;
+      for (const sid of activeSiblingIds) {
+        loadMap.set(sid, (loadMap.get(sid) ?? 0) + loadShare);
+      }
+    }
+    loadMap.set(failedId, 0);
+  }
+
+  // Apply load changes and trigger overload states
+  return nodes.map((node) => {
+    const newLoad = loadMap.get(node.id) ?? node.currentLoad;
+    if (newLoad === node.currentLoad) return node;
+
+    const isOverloaded = newLoad > node.capacity;
+    if (isOverloaded && node.status === "operational") {
+      // Overload → forced into buffering with 10s overheat timer
+      return { ...node, currentLoad: newLoad, status: "buffering" as NodeStatus, buffer: 10 };
+    }
+    if (isOverloaded && node.status === "buffering") {
+      // Already buffering → cap remaining buffer at 10s (overheat pressure)
+      return { ...node, currentLoad: newLoad, buffer: Math.min(node.buffer, 10) };
+    }
+    return { ...node, currentLoad: newLoad };
+  });
+};
+
 // ─── Store Type ──────────────────────────────────────────────────────────────
 
 type SimulationState = {
@@ -243,6 +387,13 @@ type SimulationState = {
   inventory: CityInventory;
   activePresetId: DisasterPreset["id"] | null;
   selectedRemedies: AppliedRemedy[];
+  // ── Live Impact Analytics ──
+  cityTrafficMultiplier: number;
+  totalPeopleAffected: number;
+  totalFinancialLoss: number;
+  cascadeDepth: number;
+  peakFailedCount: number;
+  // ── Actions ──
   tick: () => void;
   blastNode: (nodeId: string) => void;
   applyRemedy: (nodeId: string, remedyId: string) => void;
@@ -260,18 +411,28 @@ export const useSimulationStore = create<SimulationState>((set) => ({
   inventory: cloneInventory(),
   activePresetId: null,
   selectedRemedies: [],
+  cityTrafficMultiplier: 1.0,
+  totalPeopleAffected: 0,
+  totalFinancialLoss: 0,
+  cascadeDepth: 0,
+  peakFailedCount: 0,
 
-  // ── The Dual-Timer Tick Loop ────────────────────────────────────────────
+  // ── The Dual-Timer Tick Loop (with overload + scoreboard) ───────────────
   tick: () =>
     set((state) => {
       let inventoryChanged = false;
       const newInventory = { ...state.inventory };
-      // Clone each slot so we can mutate safely
       for (const key of Object.keys(newInventory) as ResourceType[]) {
         newInventory[key] = { ...newInventory[key] };
       }
 
-      const ticked = state.nodes.map<InfrastructureNode>((node) => {
+      // Track which nodes were failed before this tick
+      const previouslyFailedIds = new Set(
+        state.nodes.filter((n) => n.status === "failed").map((n) => n.id),
+      );
+
+      // ── Main timer processing ──────────────────────────────────────────
+      let ticked = state.nodes.map<InfrastructureNode>((node) => {
         // ── REPAIRING: both timers race ──────────────────────────────────
         if (node.status === "repairing") {
           const nextBuffer = Math.max(0, node.buffer - 1);
@@ -316,8 +477,42 @@ export const useSimulationStore = create<SimulationState>((set) => ({
         return node;
       });
 
+      // ── Overload Redistribution for newly failed nodes ─────────────────
+      const newlyFailedIds = ticked
+        .filter((n) => n.status === "failed" && !previouslyFailedIds.has(n.id) && n.currentLoad > 0)
+        .map((n) => n.id);
+
+      if (newlyFailedIds.length > 0) {
+        ticked = applyOverloadRedistribution(ticked, state.edges, newlyFailedIds);
+      }
+
+      // ── Recalculate dependents (cascade propagation) ───────────────────
+      ticked = recalculateDependents(ticked, state.edges);
+
+      // ── Compute traffic multiplier ─────────────────────────────────────
+      const cityTrafficMultiplier = computeTrafficMultiplier(ticked);
+
+      // ── Accumulate scoreboard (per-second impact) ──────────────────────
+      let totalPeopleAffected = state.totalPeopleAffected;
+      let totalFinancialLoss = state.totalFinancialLoss;
+      let currentFailedCount = 0;
+      for (const node of ticked) {
+        if (node.status === "failed") {
+          currentFailedCount++;
+          totalPeopleAffected += POPULATION_WEIGHT[node.id] ?? 0;
+          totalFinancialLoss += (ECONOMIC_COST_PER_HOUR[node.id] ?? 0) / 3600;
+        }
+      }
+      const peakFailedCount = Math.max(state.peakFailedCount, currentFailedCount);
+      const cascadeDepth = computeCascadeDepth(ticked, state.edges);
+
       const result: Partial<SimulationState> = {
-        nodes: recalculateDependents(ticked, state.edges),
+        nodes: ticked,
+        cityTrafficMultiplier,
+        totalPeopleAffected,
+        totalFinancialLoss,
+        cascadeDepth,
+        peakFailedCount,
       };
 
       if (inventoryChanged) {
@@ -327,10 +522,9 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       return result;
     }),
 
-  // ── Blast / Fail a Node ─────────────────────────────────────────────────
+  // ── Blast / Fail a Node (with overload redistribution) ──────────────────
   blastNode: (nodeId) =>
     set((state) => {
-      const node = state.nodes.find((n) => n.id === nodeId);
       const newInventory = { ...state.inventory };
       for (const key of Object.keys(newInventory) as ResourceType[]) {
         newInventory[key] = { ...newInventory[key] };
@@ -339,14 +533,17 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       // If the node was repairing, the deployed resource is lost (wasted)
       // We do NOT return it to inventory — the truck was en route to a node that just exploded
 
-      const failed = state.nodes.map<InfrastructureNode>((n) =>
+      let failed = state.nodes.map<InfrastructureNode>((n) =>
         n.id === nodeId
           ? { ...n, status: "failed", buffer: 0, rescueTimer: 0, deployedResource: null }
           : n,
       );
 
-      // If the blasted node had a deployed resource and was repairing, resource is wasted
-      // (already null'd above, inventory stays depleted)
+      // ── Overload redistribution from the blasted node ──────────────────
+      const blastedNode = state.nodes.find((n) => n.id === nodeId);
+      if (blastedNode && blastedNode.currentLoad > 0) {
+        failed = applyOverloadRedistribution(failed, state.edges, [nodeId]);
+      }
 
       return {
         nodes: recalculateDependents(failed, state.edges),
@@ -355,7 +552,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       };
     }),
 
-  // ── Apply Remedy (with inventory & deployment delay) ────────────────────
+  // ── Apply Remedy (with inventory, deployment delay & traffic multiplier) ─
   applyRemedy: (nodeId, remedyId) =>
     set((state) => {
       const target = state.nodes.find((n) => n.id === nodeId);
@@ -381,7 +578,9 @@ export const useSimulationStore = create<SimulationState>((set) => ({
         // Deduct from inventory
         slot.available -= 1;
 
-        const rescueTime = RESCUE_TIMES[nodeId] ?? 15;
+        // ── TRAFFIC RIPPLE: rescue time is scaled by gridlock ────────────
+        const baseRescueTime = RESCUE_TIMES[nodeId] ?? 15;
+        const rescueTime = Math.ceil(baseRescueTime * state.cityTrafficMultiplier);
 
         updatedNodes = state.nodes.map<InfrastructureNode>((n) => {
           if (n.id !== nodeId) return n;
@@ -444,7 +643,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       return { edges, nodes: recalculateDependents(state.nodes, edges), activePresetId: null };
     }),
 
-  // ── Presets & Reset ─────────────────────────────────────────────────────
+  // ── Presets & Reset (with scoreboard reset) ─────────────────────────────
   applyPreset: (presetId) =>
     set(() => {
       const preset = DISASTER_PRESETS.find((p) => p.id === presetId);
@@ -455,20 +654,43 @@ export const useSimulationStore = create<SimulationState>((set) => ({
           inventory: cloneInventory(),
           activePresetId: null,
           selectedRemedies: [],
+          cityTrafficMultiplier: 1.0,
+          totalPeopleAffected: 0,
+          totalFinancialLoss: 0,
+          cascadeDepth: 0,
+          peakFailedCount: 0,
         };
       }
       const edges = cloneInitialEdges().map((edge) =>
         preset.brokenEdgeIds.includes(edge.id) ? { ...edge, status: "broken" as EdgeStatus } : edge,
       );
       const seededNodes = cloneInitialNodes().map<InfrastructureNode>((node) =>
-        preset.failedNodeIds.includes(node.id) ? { ...node, status: "failed", buffer: 0 } : node,
+        preset.failedNodeIds.includes(node.id) ? { ...node, status: "failed", buffer: 0, currentLoad: 0 } : node,
       );
+
+      // Apply overload from initially failed nodes
+      const failedWithLoad = preset.failedNodeIds.filter((nid) => {
+        const orig = INITIAL_NODES.find((n) => n.id === nid);
+        return orig && orig.currentLoad > 0;
+      });
+
+      let finalNodes = recalculateDependents(seededNodes, edges);
+      if (failedWithLoad.length > 0) {
+        finalNodes = applyOverloadRedistribution(finalNodes, edges, failedWithLoad);
+        finalNodes = recalculateDependents(finalNodes, edges);
+      }
+
       return {
         edges,
-        nodes: recalculateDependents(seededNodes, edges),
+        nodes: finalNodes,
         inventory: cloneInventory(),
         activePresetId: preset.id,
         selectedRemedies: [],
+        cityTrafficMultiplier: computeTrafficMultiplier(finalNodes),
+        totalPeopleAffected: 0,
+        totalFinancialLoss: 0,
+        cascadeDepth: computeCascadeDepth(finalNodes, edges),
+        peakFailedCount: finalNodes.filter((n) => n.status === "failed").length,
       };
     }),
 
@@ -479,6 +701,11 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       inventory: cloneInventory(),
       activePresetId: null,
       selectedRemedies: [],
+      cityTrafficMultiplier: 1.0,
+      totalPeopleAffected: 0,
+      totalFinancialLoss: 0,
+      cascadeDepth: 0,
+      peakFailedCount: 0,
     }),
 }));
 
@@ -488,6 +715,12 @@ export const getRemediesForNode = (nodeId: string) => REMEDIES_BY_NODE[nodeId] ?
 export const getNodeOutDegree = (nodeId: string) => childIdsFor(nodeId).length;
 export const getResourceForNode = (nodeId: string): ResourceType | null => RESOURCE_MAPPING[nodeId] ?? null;
 export const getRescueTimeForNode = (nodeId: string): number => RESCUE_TIMES[nodeId] ?? 15;
+
+/** Returns effective rescue time accounting for the current traffic multiplier. */
+export const getEffectiveRescueTime = (nodeId: string): number => {
+  const mult = useSimulationStore.getState().cityTrafficMultiplier;
+  return Math.ceil((RESCUE_TIMES[nodeId] ?? 15) * mult);
+};
 
 export const getDownstreamNodeIds = (nodeId: string) => {
   const discovered = new Set<string>();
@@ -504,16 +737,17 @@ export const getDownstreamNodeIds = (nodeId: string) => {
 export const getStatusLabel = (status: NodeStatus) =>
   ({ operational: "Operational", buffering: "Buffering", repairing: "Deploying", failed: "Failed", recovered: "Recovered" })[status];
 
-// ─── The "What-If" Predictive Engine ─────────────────────────────────────────
+// ─── The "What-If" Predictive Engine (Enhanced) ──────────────────────────────
 
 /**
  * Pure simulation function that predicts the outcome of deploying to a specific node.
  * Does NOT touch the live game state — operates entirely on cloned data.
+ * Now includes traffic multiplier, overload redistribution, and financial impact.
  *
  * @param targetNodeId - The node we pretend to deploy our resource to
  * @param currentNodes - Current live node state (will be deep-cloned)
  * @param currentEdges - Current live edge state (will be deep-cloned)
- * @returns Prediction with savedCount, lostCount, impactScore, and affected node IDs
+ * @returns Enhanced prediction with financial impact and cascade depth
  */
 export function simulateOutcome(
   targetNodeId: string,
@@ -524,8 +758,11 @@ export function simulateOutcome(
   let simNodes = currentNodes.map((n) => ({ ...n }));
   const simEdges = currentEdges.map((e) => ({ ...e }));
 
-  // Pretend we deploy to the target node
-  const rescueTime = RESCUE_TIMES[targetNodeId] ?? 15;
+  // Compute traffic multiplier for sim context
+  const trafficMult = computeTrafficMultiplier(simNodes);
+
+  // Pretend we deploy to the target node (with traffic-adjusted rescue time)
+  const rescueTime = Math.ceil((RESCUE_TIMES[targetNodeId] ?? 15) * trafficMult);
   simNodes = simNodes.map((n) => {
     if (n.id !== targetNodeId) return n;
     return {
@@ -544,10 +781,13 @@ export function simulateOutcome(
       .map((n) => n.id),
   );
 
+  let totalFinancialImpact = 0;
+
   // Fast-forward the simulation to completion (max 300 ticks)
   const MAX_TICKS = 300;
   for (let t = 0; t < MAX_TICKS; t++) {
     let anyActive = false;
+    const prevFailedIds = new Set(simNodes.filter((n) => n.status === "failed").map((n) => n.id));
 
     simNodes = simNodes.map((node) => {
       if (node.status === "repairing") {
@@ -576,8 +816,23 @@ export function simulateOutcome(
       return node;
     });
 
+    // Overload redistribution for newly failed nodes in the sim
+    const simNewlyFailed = simNodes
+      .filter((n) => n.status === "failed" && !prevFailedIds.has(n.id) && n.currentLoad > 0)
+      .map((n) => n.id);
+    if (simNewlyFailed.length > 0) {
+      simNodes = applyOverloadRedistribution(simNodes, simEdges, simNewlyFailed);
+    }
+
     // Propagate cascade
     simNodes = recalculateDependents(simNodes, simEdges);
+
+    // Accumulate financial impact per simulated second
+    for (const node of simNodes) {
+      if (node.status === "failed") {
+        totalFinancialImpact += (ECONOMIC_COST_PER_HOUR[node.id] ?? 0) / 3600;
+      }
+    }
 
     if (!anyActive) break;
   }
@@ -605,5 +860,77 @@ export function simulateOutcome(
     lostCount: lostNodes.length,
     impactScore,
     affectedNodeIds: lostNodes,
+    financialImpact: totalFinancialImpact,
+    cascadeDepth: computeCascadeDepth(simNodes, simEdges),
   };
+}
+
+// ─── Export / Load Scenario Helpers ──────────────────────────────────────────
+
+/**
+ * Exports the current simulation state as a JSON "After-Action Report" and triggers a download.
+ */
+export function exportAfterActionReport() {
+  const state = useSimulationStore.getState();
+  const report = {
+    meta: {
+      title: "Pralayaant After-Action Report",
+      exportedAt: new Date().toISOString(),
+      simulationEngine: "v3",
+    },
+    scenario: {
+      activePresetId: state.activePresetId,
+    },
+    state: {
+      nodes: state.nodes,
+      edges: state.edges,
+      inventory: state.inventory,
+    },
+    scoreboard: {
+      totalPeopleAffected: state.totalPeopleAffected,
+      totalFinancialLoss: state.totalFinancialLoss,
+      cascadeDepth: state.cascadeDepth,
+      peakFailedCount: state.peakFailedCount,
+      cityTrafficMultiplier: state.cityTrafficMultiplier,
+    },
+    remedies: state.selectedRemedies,
+  };
+
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `pralayaant-report-${Date.now()}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Loads a previously exported scenario JSON and restores the simulation state.
+ * Returns true if the load was successful.
+ */
+export function loadScenarioFromJSON(json: unknown): boolean {
+  const data = json as Record<string, unknown>;
+  if (!data?.state) return false;
+  const stateData = data.state as Record<string, unknown>;
+  if (!Array.isArray(stateData.nodes) || !Array.isArray(stateData.edges)) return false;
+
+  const scoreboard = (data.scoreboard ?? {}) as Record<string, number>;
+  const scenario = (data.scenario ?? {}) as Record<string, string | null>;
+
+  useSimulationStore.setState({
+    nodes: stateData.nodes as InfrastructureNode[],
+    edges: stateData.edges as DependencyEdge[],
+    inventory: (stateData.inventory as CityInventory) ?? cloneInventory(),
+    activePresetId: (scenario.activePresetId as DisasterPreset["id"]) ?? null,
+    selectedRemedies: (data.remedies as AppliedRemedy[]) ?? [],
+    totalPeopleAffected: scoreboard.totalPeopleAffected ?? 0,
+    totalFinancialLoss: scoreboard.totalFinancialLoss ?? 0,
+    cascadeDepth: scoreboard.cascadeDepth ?? 0,
+    peakFailedCount: scoreboard.peakFailedCount ?? 0,
+    cityTrafficMultiplier: scoreboard.cityTrafficMultiplier ?? 1.0,
+  });
+  return true;
 }

@@ -1,9 +1,23 @@
-import React, { useState, useMemo, useEffect } from "react";
-import Map, { Source, Layer, Marker, type MapMouseEvent } from "react-map-gl/maplibre";
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import Map, { Source, Layer, Marker } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { Feature, FeatureCollection, Polygon, Point } from "geojson";
+import type { Feature, FeatureCollection } from "geojson";
+import { motion } from "framer-motion";
 import { useSimulationStore, type InfrastructureNode } from "@/lib/simulationStore";
-import { Clock3, Truck, AlertTriangle, Zap, Droplets, Radio, Heart, Shield, Activity } from "lucide-react";
+import { getEdgeRouteCoordinates, getRouteMetadata } from "@/lib/routePolylines";
+import { AlertTriangle, Zap, Droplets, Radio, Heart, Shield, Activity, Bomb } from "lucide-react";
+
+// ============================================================================
+// Style mappings matching cyberpunk command center aesthetics
+// ============================================================================
+
+const COLOR_MAP = {
+  operational: "#00FF66",   // Neon Green
+  recovered: "#00FF66",     // Neon Green
+  buffering: "#FF9900",     // Warning Orange
+  failed: "#FF0033",        // Crimson Red
+  repairing: "#00E5FF",     // Cyber Cyan
+};
 
 const sectorIcons: Record<string, typeof Zap> = {
   POWER: Zap,
@@ -14,110 +28,111 @@ const sectorIcons: Record<string, typeof Zap> = {
   CIVIC: Shield,
 };
 
-// Safe wrappers using raw React.createElement to prevent Vite JSX parser from injecting data-loc attributes
-const SafeSource = (props: any) => {
-  const { "data-loc": _, ...rest } = props;
-  return React.createElement(Source, rest);
-};
-
-const SafeLayer = (props: any) => {
-  const { "data-loc": _, ...rest } = props;
-  return React.createElement(SafeLayerWrapper, rest);
-};
-
-// Sub-wrapper to discard data-loc from Layer element
-const SafeLayerWrapper = (props: any) => {
-  const { "data-loc": _, ...rest } = props;
-  return React.createElement(Layer, rest);
+const blastLabels: Record<string, string> = {
+  explosion: "BOOM!!",
+  flood: "SPLASH!!",
+  cyber: "SYSTEM BRICKED!!",
 };
 
 interface LiveCityMapProps {
-  onNodeClick: (nodeId: string) => void;
+  selectedNodeId?: string | null;
+  onNodeClick?: (nodeId: string) => void;
   onEdgeClick?: (edgeId: string) => void;
 }
 
-const formatDuration = (seconds: number) => {
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
-};
-
-/**
- * Calculates a circle polygon for Mapbox GeoJSON Source representation
- */
-function getCirclePolygon(lng: number, lat: number, radiusInMeters: number): Feature<Polygon> {
-  const coordinates = [];
-  const steps = 64;
-  const km = radiusInMeters / 1000;
-
-  for (let i = 0; i < steps; i++) {
-    const theta = (i / steps) * (2 * Math.PI);
-    const dx = km * Math.cos(theta);
-    const dy = km * Math.sin(theta);
-    // 1 degree latitude = ~111.32 km
-    const latOffset = dy / 111.32;
-    // 1 degree longitude = ~111.32 * cos(latitude) km
-    const lngOffset = dx / (111.32 * Math.cos((lat * Math.PI) / 180));
-    coordinates.push([lng + lngOffset, lat + latOffset]);
-  }
-  coordinates.push(coordinates[0]);
-
-  return {
-    type: "Feature",
-    geometry: {
-      type: "Polygon",
-      coordinates: [coordinates],
-    },
-    properties: {},
-  };
+interface HoveredEdgeInfo {
+  id: string;
+  label: string;
+  status: string;
+  sourceLabel: string;
+  targetLabel: string;
+  distanceKm: number | null;
+  durationMin: number | null;
+  corridor: string | null;
 }
 
-export default function LiveCityMap({ onNodeClick, onEdgeClick }: LiveCityMapProps) {
+export default function LiveCityMap({ selectedNodeId, onNodeClick, onEdgeClick }: LiveCityMapProps) {
   const nodes = useSimulationStore((state) => state.nodes);
   const edges = useSimulationStore((state) => state.edges);
 
   const [cursor, setCursor] = useState<string>("auto");
-  const [hoveredNode, setHoveredNode] = useState<InfrastructureNode | null>(null);
+  const [hoveredEdge, setHoveredEdge] = useState<HoveredEdgeInfo | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
-  const [pulseRadius, setPulseRadius] = useState<number>(300);
 
-  // Pulse animation loop for failed node hazard zones
+  // ── Blast Disruption Animations State ──
+  interface BlastInstance {
+    id: string;
+    nodeId: string;
+    type: "explosion" | "flood" | "cyber";
+    phase: "dropping" | "exploding";
+  }
+  const [blasts, setBlasts] = useState<BlastInstance[]>([]);
+  const [mapShake, setMapShake] = useState(false);
+  const prevStatuses = useRef<Record<string, string>>({});
+
   useEffect(() => {
-    let direction = 1;
-    const interval = setInterval(() => {
-      setPulseRadius((prev) => {
-        let next = prev + direction * 12;
-        if (next >= 850) {
-          direction = -1;
-          return 850;
+    const newBlasts: BlastInstance[] = [];
+    nodes.forEach((node) => {
+      const prev = prevStatuses.current[node.id];
+      if (prev && prev !== "failed" && node.status === "failed") {
+        let type: BlastInstance["type"] = "explosion";
+        const presetId = useSimulationStore.getState().activePresetId;
+        
+        if (presetId === "monsoon-flood") {
+          type = "flood";
+        } else if (presetId === "cyber-attack" || node.sector === "COMMS") {
+          type = "cyber";
+        } else if (node.sector === "WATER") {
+          type = "flood";
         }
-        if (next <= 250) {
-          direction = 1;
-          return 250;
-        }
-        return next;
+        
+        newBlasts.push({
+          id: `${node.id}-${Date.now()}-${Math.random()}`,
+          nodeId: node.id,
+          type,
+          phase: "dropping",
+        });
+      }
+      prevStatuses.current[node.id] = node.status;
+    });
+
+    if (newBlasts.length > 0) {
+      setBlasts((prev) => [...prev, ...newBlasts]);
+
+      newBlasts.forEach((blast) => {
+        // 1. Bomb falls from above for 600ms
+        setTimeout(() => {
+          setBlasts((prev) =>
+            prev.map((b) => (b.id === blast.id ? { ...b, phase: "exploding" } : b))
+          );
+          // Trigger map shake
+          setMapShake(true);
+          setTimeout(() => setMapShake(false), 450);
+
+          // 2. Explosion shockwave runs for 800ms
+          setTimeout(() => {
+            setBlasts((prev) => prev.filter((b) => b.id !== blast.id));
+          }, 800);
+        }, 600);
       });
-    }, 45);
-    return () => clearInterval(interval);
-  }, []);
+    }
+  }, [nodes]);
 
-
-  // Compute GeoJSON features for edges (connections)
+  // Compute GeoJSON features for edges with structured road network polylines
   const edgesGeoJSON = useMemo<FeatureCollection>(() => {
-    const features: Feature[] = [];
+    const features: any[] = [];
     for (const edge of edges) {
       const sourceNode = nodes.find((n) => n.id === edge.source);
       const targetNode = nodes.find((n) => n.id === edge.target);
       if (sourceNode && targetNode) {
+        const polylineCoordinates = getEdgeRouteCoordinates(edge.id, sourceNode, targetNode);
+        const meta = getRouteMetadata(edge.id);
         features.push({
           type: "Feature",
           id: edge.id,
           geometry: {
             type: "LineString",
-            coordinates: [
-              [sourceNode.lng, sourceNode.lat],
-              [targetNode.lng, targetNode.lat],
-            ],
+            coordinates: polylineCoordinates,
           },
           properties: {
             id: edge.id,
@@ -125,6 +140,11 @@ export default function LiveCityMap({ onNodeClick, onEdgeClick }: LiveCityMapPro
             label: edge.label,
             sourceStatus: sourceNode.status,
             targetStatus: targetNode.status,
+            sourceLabel: sourceNode.label,
+            targetLabel: targetNode.label,
+            distanceKm: meta?.distanceKm ?? null,
+            durationMin: meta?.durationMin ?? null,
+            corridor: meta?.corridor ?? null,
           },
         });
       }
@@ -135,62 +155,64 @@ export default function LiveCityMap({ onNodeClick, onEdgeClick }: LiveCityMapPro
     };
   }, [edges, nodes]);
 
-  // Compute GeoJSON features for failed nodes (pulsing hazard blast zones)
-  const blastZonesGeoJSON = useMemo<FeatureCollection>(() => {
-    const failed = nodes.filter((node) => node.status === "failed");
-    return {
-      type: "FeatureCollection",
-      features: failed.map((node) => {
-        const poly = getCirclePolygon(node.lng, node.lat, pulseRadius);
-        return {
-          ...poly,
-          properties: {
-            nodeId: node.id,
-          },
-        };
-      }),
-    };
-  }, [nodes, pulseRadius]);
-
-  const handleMapClick = (event: MapMouseEvent) => {
+  const handleMapClick = (event: any) => {
     const features = event.features;
     if (features && features.length > 0) {
       const clickedFeature = features[0];
-      if (clickedFeature.layer?.id === "nodes-layer") {
-        onNodeClick(clickedFeature.properties?.id);
-      } else if (clickedFeature.layer?.id === "edges-layer" && onEdgeClick) {
+      if (
+        (clickedFeature.layer?.id === "edges-layer" ||
+          clickedFeature.layer?.id === "edges-hitbox" ||
+          clickedFeature.layer?.id === "edges-glow") &&
+        onEdgeClick
+      ) {
         onEdgeClick(clickedFeature.properties?.id);
       }
     }
   };
 
-  const handleMouseMove = (event: MapMouseEvent) => {
+  const handleMouseMove = (event: any) => {
     const features = event.features;
     if (features && features.length > 0) {
       const firstFeature = features[0];
-      if (firstFeature.layer?.id === "nodes-layer") {
-        const node = nodes.find((n) => n.id === firstFeature.properties?.id);
-        if (node) {
-          setHoveredNode(node);
+      if (
+        firstFeature.layer?.id === "edges-layer" ||
+        firstFeature.layer?.id === "edges-hitbox" ||
+        firstFeature.layer?.id === "edges-glow"
+      ) {
+        const edge = edges.find((e) => e.id === firstFeature.properties?.id);
+        if (edge) {
+          const sourceNode = nodes.find((n) => n.id === edge.source);
+          const targetNode = nodes.find((n) => n.id === edge.target);
+          const meta = getRouteMetadata(edge.id);
+          setHoveredEdge({
+            id: edge.id,
+            label: edge.label,
+            status: edge.status,
+            sourceLabel: sourceNode?.label || edge.source,
+            targetLabel: targetNode?.label || edge.target,
+            distanceKm: meta?.distanceKm ?? null,
+            durationMin: meta?.durationMin ?? null,
+            corridor: meta?.corridor ?? null,
+          });
           setTooltipPos({ x: event.point.x, y: event.point.y });
           setCursor("pointer");
           return;
         }
       }
     }
-    setHoveredNode(null);
+    setHoveredEdge(null);
     setTooltipPos(null);
     setCursor("auto");
   };
 
-  const handleMouseLeave = () => {
-    setHoveredNode(null);
-    setTooltipPos(null);
-    setCursor("auto");
+  const formatDuration = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
   };
 
   return (
-    <div className="live-gis-map-container" style={{ width: "100%", height: "100%", position: "relative" }}>
+    <div className={`live-gis-map-container relative w-full h-full ${mapShake ? "screenshake-active" : ""}`} style={{ width: "100%", height: "100%", position: "relative" }}>
       <Map
         initialViewState={{
           longitude: 79.075,
@@ -202,14 +224,14 @@ export default function LiveCityMap({ onNodeClick, onEdgeClick }: LiveCityMapPro
         mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
         onClick={handleMapClick}
         onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-        interactiveLayerIds={["edges-layer"]}
+        onMouseLeave={() => { setHoveredEdge(null); setTooltipPos(null); setCursor("auto"); }}
+        interactiveLayerIds={["edges-hitbox", "edges-layer"]}
         cursor={cursor}
       >
-        {/* ── Dependency Edge Lines (Neon Glow Layer) ── */}
-        <SafeSource id="edges-source" type="geojson" data={edgesGeoJSON}>
-          {/* Background Glow */}
-          <SafeLayer
+        {/* ── Dependency Edge Lines (Structured Road Network Polylines) ── */}
+        <Source id="edges-source" type="geojson" data={edgesGeoJSON}>
+          {/* Layer 1A: Wide Cybernetic Glow Aura */}
+          <Layer
             id="edges-glow"
             type="line"
             paint={{
@@ -218,21 +240,37 @@ export default function LiveCityMap({ onNodeClick, onEdgeClick }: LiveCityMapPro
                 ["get", "status"],
                 "broken",
                 "#EF4444",
-                ["match", ["get", "sourceStatus"], "failed", "#EF4444", "#3B82F6"],
+                ["match", ["get", "sourceStatus"], "failed", "#F97316", "#0284C7"],
               ],
               "line-width": [
                 "match",
                 ["get", "status"],
                 "broken",
-                8,
-                ["match", ["get", "sourceStatus"], "failed", 6, 4],
+                9,
+                ["match", ["get", "sourceStatus"], "failed", 7, 5],
               ],
-              "line-opacity": 0.35,
-              "line-blur": 3,
+              "line-opacity": 0.45,
+              "line-blur": 3.5,
             }}
           />
-          {/* Core Line */}
-          <SafeLayer
+          {/* Layer 1B: Dark Under-casing */}
+          <Layer
+            id="edges-casing"
+            type="line"
+            paint={{
+              "line-color": "#09090B",
+              "line-width": [
+                "match",
+                ["get", "status"],
+                "broken",
+                4.5,
+                3.8,
+              ],
+              "line-opacity": 0.85,
+            }}
+          />
+          {/* Layer 1C: Crisp Core Route Wire */}
+          <Layer
             id="edges-layer"
             type="line"
             paint={{
@@ -241,94 +279,161 @@ export default function LiveCityMap({ onNodeClick, onEdgeClick }: LiveCityMapPro
                 ["get", "status"],
                 "broken",
                 "#EF4444",
-                ["match", ["get", "sourceStatus"], "failed", "#F87171", "#3B82F6"],
+                ["match", ["get", "sourceStatus"], "failed", "#FB923C", "#38BDF8"],
               ],
               "line-width": [
                 "match",
                 ["get", "status"],
                 "broken",
-                3,
-                ["match", ["get", "sourceStatus"], "failed", 2.5, 1.5],
+                2.8,
+                ["match", ["get", "sourceStatus"], "failed", 2.4, 2.0],
               ],
-              "line-dasharray": ["match", ["get", "status"], "broken", ["literal", [3, 2]], ["literal", [1, 0]]],
-              "line-opacity": 0.95,
+              "line-opacity": 0.98,
             }}
           />
-        </SafeSource>
-
-        {/* ── Layer 2: Pulsing Red Hazard Blast Zones ── */}
-        <SafeSource id="blast-source" type="geojson" data={blastZonesGeoJSON}>
-          <SafeLayer
-            id="blast-layer"
-            type="fill"
+          {/* Layer 1D: Hitbox */}
+          <Layer
+            id="edges-hitbox"
+            type="line"
             paint={{
-              "fill-color": "#EF4444",
-              "fill-opacity": 0.18,
-              "fill-outline-color": "#EF4444",
+              "line-color": "#FFFFFF",
+              "line-width": 18,
+              "line-opacity": 0.001,
             }}
           />
-        </SafeSource>
+        </Source>
 
-        {/* ── Layer 3: Infrastructure Node Floating Icons (Markers) ── */}
+        {/* ── Layer 2: Infrastructure Node Floating Icons (Markers) ── */}
         {nodes.map((node) => {
           const Icon = sectorIcons[node.sector] || Shield;
+          const color = COLOR_MAP[node.status] || COLOR_MAP.operational;
+          const isSelected = selectedNodeId === node.id;
+
           return (
             <Marker key={node.id} longitude={node.lng} latitude={node.lat} anchor="center">
               <div
-                className={`map-node-marker status-${node.status}`}
+                className={`map-node-marker status-${node.status} relative flex items-center justify-center cursor-pointer`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onNodeClick(node.id);
+                  onNodeClick?.(node.id);
                 }}
               >
-                {/* Logo circle */}
-                <div className="marker-circle">
-                  <Icon size={16} className="marker-icon" />
-                  
-                  {/* Warning triangle badge when failed */}
-                  {node.status === "failed" && (
-                    <div className="marker-warning-badge">
-                      <AlertTriangle size={8} />
-                    </div>
-                  )}
-                </div>
+                {/* ── Active Scanning Repair Drone (when deploying) ── */}
+                {node.status === "repairing" && (
+                  <div className="marker-drone-hover">
+                    <Radio size={14} className="drone-icon" />
+                    <div className="drone-scan-laser" />
+                  </div>
+                )}
 
-                {/* Info and counters */}
-                <div className="marker-info">
-                  <div className="marker-id">{node.assetId}</div>
-
-                  {/* Micro Progress Bar overlay (when buffering or repairing) */}
-                  {(node.status === "buffering" || node.status === "repairing") && (
-                    <div className="marker-mini-progress">
-                      <div className="mini-track">
-                        <div
-                          className="mini-bar danger"
-                          style={{ width: `${(node.buffer / node.baseBuffer) * 100}%` }}
-                        />
-                      </div>
-                      {node.status === "repairing" && (
-                        <div className="mini-track">
-                          <div
-                            className="mini-bar rescue"
-                            style={{ width: `${(1 - node.rescueTimer / node.maxRescueTime) * 100}%` }}
-                          />
+                {/* ── Dynamic Blast & Disruption Animations ── */}
+                {blasts
+                  .filter((b) => b.nodeId === node.id)
+                  .map((blast) => (
+                    <div className="marker-blast-effect" key={blast.id}>
+                      {blast.phase === "dropping" && (
+                        <div className="falling-bomb">
+                          <Bomb size={16} className="falling-bomb-icon" />
+                          <div className="bomb-trail" />
                         </div>
                       )}
+                      {blast.phase === "exploding" && (
+                        <>
+                          <div className={`blast-ring ${blast.type === "flood" ? "flood-ripple" : blast.type === "cyber" ? "cyber-glitch" : ""}`} />
+                          <div className={`blast-flash ${blast.type === "flood" ? "flood-flash" : blast.type === "cyber" ? "cyber-flash" : ""}`} />
+                          <div className="blast-text-pop">{blastLabels[blast.type]}</div>
+                          {Array.from({ length: 8 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className={`blast-spark ${blast.type === "flood" ? "flood-drop" : blast.type === "cyber" ? "cyber-bit" : ""}`}
+                            />
+                          ))}
+                        </>
+                      )}
                     </div>
-                  )}
+                  ))}
 
-                  {/* Timer Badge overlays */}
+                {/* ── Blast Radius Radar Pulse (FAILED status) ── */}
+                {node.status === "failed" && (
+                  <motion.div
+                    className="absolute rounded-full pointer-events-none"
+                    style={{
+                      width: 50,
+                      height: 50,
+                      border: `2px solid ${COLOR_MAP.failed}`,
+                      background: "radial-gradient(circle, rgba(255, 0, 51, 0.2) 0%, transparent 70%)",
+                    }}
+                    initial={{ scale: 1, opacity: 0.8 }}
+                    animate={{ scale: 4, opacity: 0 }}
+                    transition={{
+                      duration: 2.2,
+                      ease: "easeOut",
+                      repeat: Infinity,
+                    }}
+                  />
+                )}
+
+                {/* ── Buffering Ripple Indicator (Warning pulses) ── */}
+                {node.status === "buffering" && (
+                  <motion.div
+                    className="absolute rounded-full pointer-events-none"
+                    style={{
+                      width: 44,
+                      height: 44,
+                      border: `1.5px dashed ${COLOR_MAP.buffering}`,
+                    }}
+                    animate={{ rotate: 360 }}
+                    transition={{
+                      duration: 10,
+                      ease: "linear",
+                      repeat: Infinity,
+                    }}
+                  />
+                )}
+
+                {/* ── Base Node Ring ── */}
+                <motion.div
+                  className="relative flex items-center justify-center rounded-full bg-[#0a0a0c] z-20 shadow-2xl transition-all duration-300"
+                  style={{
+                    width: 40,
+                    height: 40,
+                    border: `2px solid ${color}`,
+                    boxShadow: isSelected 
+                      ? `0 0 15px ${color}, inset 0 0 8px ${color}`
+                      : `0 0 6px ${color}40`,
+                  }}
+                  whileHover={{ scale: 1.12 }}
+                >
+                  {/* Icon */}
+                  <Icon size={15} style={{ color }} />
+
+                  {/* Warning Triangle Sub-badge */}
+                  {(node.status === "failed" || node.status === "buffering") && (
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black border border-amber-500 z-30">
+                      <AlertTriangle size={8} className="text-amber-500" />
+                    </span>
+                  )}
+                </motion.div>
+
+                {/* ── Tactical Holographic HUD Labels ── */}
+                <div className="absolute top-11 flex flex-col items-center pointer-events-none z-30 opacity-80 transition-opacity">
+                  <span 
+                    className="px-2 py-0.5 rounded text-[8px] font-bold font-mono tracking-widest bg-black/90 border border-zinc-800 uppercase"
+                    style={{ color }}
+                  >
+                    {node.assetId}
+                  </span>
+                  
+                  {/* Live Timer Overlays */}
                   {node.status === "buffering" && (
-                    <div className="marker-timer danger-text">{formatDuration(node.buffer)}</div>
+                    <span className="mt-1 text-[8px] font-bold text-amber-500 font-mono animate-pulse">
+                      BUFF: {formatDuration(node.buffer)}
+                    </span>
                   )}
                   {node.status === "repairing" && (
-                    <div className="marker-timer rescue-text">
-                      <Truck size={8} className="marker-truck-icon" style={{ display: 'inline', marginRight: 2 }} />
-                      <span>{formatDuration(node.rescueTimer)}</span>
-                    </div>
-                  )}
-                  {node.status === "failed" && (
-                    <div className="marker-timer danger-text">OFFLINE</div>
+                    <span className="mt-1 text-[8px] font-bold text-[#00E5FF] font-mono">
+                      ETA: {formatDuration(node.rescueTimer)}
+                    </span>
                   )}
                 </div>
               </div>
@@ -337,10 +442,10 @@ export default function LiveCityMap({ onNodeClick, onEdgeClick }: LiveCityMapPro
         })}
       </Map>
 
-      {/* ── Hover Tooltip (follows cursor on screen coordinate) ── */}
-      {hoveredNode && tooltipPos && (
+      {/* ── Route Hover Tooltip ── */}
+      {hoveredEdge && tooltipPos && (
         <div
-          className="map-hover-tooltip"
+          className="map-hover-tooltip route-hover-tooltip"
           style={{
             position: "absolute",
             left: tooltipPos.x + 15,
@@ -350,40 +455,30 @@ export default function LiveCityMap({ onNodeClick, onEdgeClick }: LiveCityMapPro
           }}
         >
           <div className="tooltip-header">
-            <span className="tooltip-sector">{hoveredNode.sector}</span>
-            <span className={`tooltip-status text-${hoveredNode.status}`}>{hoveredNode.status.toUpperCase()}</span>
+            <span className="tooltip-sector">STRUCTURED ROUTE</span>
+            <span className={`tooltip-status text-${hoveredEdge.status === "broken" ? "failed" : "operational"}`}>
+              {hoveredEdge.status === "broken" ? "RUPTURED" : "OPERATIONAL"}
+            </span>
           </div>
           <div className="tooltip-body">
-            <strong className="tooltip-title">{hoveredNode.label}</strong>
-            <div className="tooltip-asset-id">{hoveredNode.assetId}</div>
-
-            {/* Countdown meters inside tooltip */}
-            {hoveredNode.status === "buffering" && (
-              <div className="tooltip-countdown warning">
-                <Clock3 size={12} />
-                <span>BATTERY: {formatDuration(hoveredNode.buffer)}</span>
+            <strong className="tooltip-title">{hoveredEdge.label}</strong>
+            <div className="tooltip-route-path">
+              <span>{hoveredEdge.sourceLabel}</span>
+              <span className="route-arrow">➔</span>
+              <span>{hoveredEdge.targetLabel}</span>
+            </div>
+            {hoveredEdge.corridor && (
+              <div className="tooltip-corridor">{hoveredEdge.corridor}</div>
+            )}
+            {hoveredEdge.distanceKm !== null && (
+              <div className="tooltip-metrics">
+                <span>{hoveredEdge.distanceKm} km structured road route</span>
+                {hoveredEdge.durationMin !== null && (
+                  <span> · ~{hoveredEdge.durationMin} min transit</span>
+                )}
               </div>
             )}
-
-            {hoveredNode.status === "repairing" && (
-              <div className="tooltip-countdown-pair">
-                <div className="tooltip-countdown warning">
-                  <Clock3 size={12} />
-                  <span>BATTERY: {formatDuration(hoveredNode.buffer)}</span>
-                </div>
-                <div className="tooltip-countdown info">
-                  <Truck size={12} />
-                  <span>RESCUE: {formatDuration(hoveredNode.rescueTimer)}</span>
-                </div>
-              </div>
-            )}
-
-            {hoveredNode.status === "failed" && (
-              <div className="tooltip-countdown danger">
-                <AlertTriangle size={12} />
-                <span>ASSET OFFLINE</span>
-              </div>
-            )}
+            <div className="tooltip-click-hint">Click route to inspect or trigger rupture</div>
           </div>
         </div>
       )}
