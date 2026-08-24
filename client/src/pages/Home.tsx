@@ -8,15 +8,13 @@
  * - Sector-specific costed interventions with deployment delays
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Background, BackgroundVariant, MarkerType, ReactFlow, type Edge, type NodeMouseHandler } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import "./intervention.css";
 import {
   AlertTriangle, ArrowRight, Battery, BrainCircuit, Bomb, Cable, Calculator,
   Check, ChevronRight, CircleDot, Clock3, Droplets, Link2Off, Network,
   Radio, RefreshCcw, Route, Truck, Unplug, Users, Wrench, X, Zap,
 } from "lucide-react";
-import InfrastructureNode, { type InfrastructureFlowNode } from "@/components/InfrastructureNode";
+import LiveCityMap from "@/components/LiveCityMap";
 import {
   DISASTER_PRESETS,
   getDownstreamNodeIds,
@@ -32,10 +30,10 @@ import {
   type NodeStatus,
   type ResourceType,
   type TriagePrediction,
+  POPULATION_WEIGHT,
   useSimulationStore,
 } from "@/lib/simulationStore";
 
-const nodeTypes = { infrastructure: InfrastructureNode };
 
 const statusDetail: Record<NodeStatus, { eyebrow: string; copy: string }> = {
   operational: { eyebrow: "Nominal asset", copy: "This dependency is available and has no active local intervention." },
@@ -49,18 +47,7 @@ const formatDuration = (seconds: number) => `${String(Math.floor(seconds / 60)).
 const formatCost = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
 const formatPopulation = (value: number) => value >= 1000 ? `${Math.round(value / 1000)}K` : String(value);
 
-const makeFlowNodes = (nodes: SimulationNode[]): InfrastructureFlowNode[] =>
-  nodes.map((node) => ({ id: node.id, type: "infrastructure", position: { x: node.x, y: node.y }, data: node, draggable: false, selectable: true }));
 
-const edgeTone = (edge: SimulationEdge, nodes: SimulationNode[]) => {
-  const source = nodes.find((node) => node.id === edge.source);
-  const target = nodes.find((node) => node.id === edge.target);
-  if (edge.status === "broken") return "#EF4444";
-  if (source?.status === "failed") return "#F87171";
-  if (target?.status === "repairing") return "#3B82F6";
-  if (target?.status === "buffering") return "#F59E0B";
-  return "#787880";
-};
 
 /** Icon per resource type for the inventory HUD */
 const resourceIcon: Record<ResourceType, typeof Zap> = {
@@ -92,12 +79,16 @@ export default function Home() {
   const [triagePrediction, setTriagePrediction] = useState<TriagePrediction | null>(null);
   const [isTriageLoading, setTriageLoading] = useState(false);
 
+  // Gamification States
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [hasStartedChallenge, setStartedChallenge] = useState(false);
+
   useEffect(() => {
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [tick]);
 
-  const flowNodes = useMemo(() => makeFlowNodes(nodes), [nodes]);
+
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) ?? null;
   const impactNode = nodes.find((node) => node.id === impactNodeId) ?? null;
@@ -112,33 +103,59 @@ export default function Home() {
   const totalInventory = Object.values(inventory).reduce((sum, slot) => sum + slot.available, 0);
   const maxInventory = Object.values(inventory).reduce((sum, slot) => sum + slot.max, 0);
 
-  const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => {
-    const tone = edgeTone(edge, nodes);
-    const isBroken = edge.status === "broken";
-    const sourceFailed = nodes.find((node) => node.id === edge.source)?.status === "failed";
-    const targetRepairing = nodes.find((node) => node.id === edge.target)?.status === "repairing";
-    return {
-      id: edge.id, source: edge.source, target: edge.target,
-      label: isBroken ? `RUPTURE · ${edge.label}` : edge.label,
-      type: "smoothstep",
-      animated: !isBroken && !sourceFailed && (
-        nodes.find((node) => node.id === edge.target)?.status === "buffering" || targetRepairing
-      ),
-      markerEnd: { type: MarkerType.ArrowClosed, color: tone },
-      interactionWidth: 28,
-      style: {
-        stroke: tone, strokeWidth: isBroken || sourceFailed ? 2.5 : 1.35,
-        strokeDasharray: isBroken ? "9 6" : undefined,
-        opacity: isBroken ? 0.96 : 1,
-      },
-      labelStyle: {
-        fill: isBroken ? "#F87171" : "#B4B4BB", fontSize: 9,
-        fontFamily: "IBM Plex Mono, monospace", fontWeight: isBroken ? 600 : 500,
-      },
-      labelBgStyle: { fill: isBroken ? "#210C0E" : "#101012", fillOpacity: 0.94 },
-      labelBgPadding: [4, 2] as [number, number],
-    };
-  }), [edges, nodes]);
+  // Gamification Calculations
+  const stabilityIndex = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        (nodes.filter((n) => n.status === "operational" || n.status === "recovered").length / nodes.length) * 100
+      )
+    )
+  );
+
+  const remainingBudget = 1500000 - selectedCost;
+
+  const totalPopulation = Object.values(POPULATION_WEIGHT).reduce((a, b) => a + b, 0);
+  const securedPopulation = nodes
+    .filter((n) => n.status === "operational" || n.status === "recovered")
+    .reduce((acc, n) => acc + POPULATION_WEIGHT[n.id], 0);
+
+  const gameScore = Math.max(0, Math.round(stabilityIndex * 150 - selectedCost / 2000 - elapsedTime * 3));
+
+  const getGameRank = () => {
+    if (stabilityIndex >= 90 && selectedCost <= 500000 && elapsedTime < 45) return { label: "S-Rank (Elite)", color: "#10B981" };
+    if (stabilityIndex >= 75 && selectedCost <= 800000 && elapsedTime < 90) return { label: "A-Rank (Expert)", color: "#3B82F6" };
+    if (stabilityIndex >= 50 && selectedCost <= 1200000) return { label: "B-Rank (Capable)", color: "#F59E0B" };
+    return { label: "C-Rank (Disrupted)", color: "#EF4444" };
+  };
+  const rank = getGameRank();
+
+  // Challenge Start Trigger
+  useEffect(() => {
+    if (activeIncidents > 0 && !hasStartedChallenge) {
+      setStartedChallenge(true);
+      setElapsedTime(0);
+    }
+  }, [activeIncidents, hasStartedChallenge]);
+
+  // Challenge Timer
+  useEffect(() => {
+    let timerInterval: number;
+    if (activeIncidents > 0 && hasStartedChallenge) {
+      timerInterval = window.setInterval(() => {
+        setElapsedTime((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(timerInterval);
+  }, [activeIncidents, hasStartedChallenge]);
+
+  // Game Victory/Defeat Checks
+  const isCompleted = hasStartedChallenge && activeIncidents === 0 && repairingNodes.length === 0 && stabilityIndex === 100;
+  const isLost = hasStartedChallenge && (stabilityIndex === 0 || nodes.find((n) => n.id === "hospital-icu")?.status === "failed");
+
+
+
 
   const impactedAssets = useMemo(() => {
     if (!impactNode) return [];
@@ -146,8 +163,8 @@ export default function Home() {
     return nodes.filter((node) => downstream.has(node.id) && (node.status === "buffering" || node.status === "failed" || node.status === "recovered" || node.status === "repairing"));
   }, [impactNode, nodes]);
 
-  const onNodeClick: NodeMouseHandler<InfrastructureFlowNode> = (_, clickedNode) => {
-    setSelectedEdgeId(null); setImpactNodeId(null); setSelectedNodeId(clickedNode.id);
+  const onNodeClick = (clickedNodeId: string) => {
+    setSelectedEdgeId(null); setImpactNodeId(null); setSelectedNodeId(clickedNodeId);
     setTriagePrediction(null); setTriageLoading(false);
   };
   const closeAllContexts = () => {
@@ -181,13 +198,38 @@ export default function Home() {
   return (
     <main className="simulator-shell">
       <header className="simulator-header">
-        <div className="brand-block"><img className="brand-mark" src="/manus-storage/urban-cascade-mark_e0d5502c.png" alt="Urban cascade simulation mark" /><div><p className="section-kicker">Municipal Systems</p><h1>Cascade Field <span>/ Urban Infrastructure</span></h1></div></div>
+        <div className="brand-block"><img className="brand-mark" src="/manus-storage/urban-cascade-mark_e0d5502c.png" alt="Urban cascade simulation mark" /><div><p className="section-kicker">Municipal Systems · Nagpur Grid</p><h1>Cascade Field <span>/ Urban Infrastructure</span></h1></div></div>
         <div className="header-meta">
           <div className={`status-readout ${activeIncidents ? "status-alert" : ""}`}><span className="readout-led" /> {activeIncidents ? `${activeIncidents} active incident${activeIncidents === 1 ? "" : "s"}` : "Simulation ready"}</div>
           <span className="header-divider" />
-          <span className="technical-id">{healthyEdgeCount}/{edges.length} PATHWAYS INTEGRAL</span>
+          <div className="game-telemetry stability-hud">
+            <span>STABILITY</span>
+            <strong className={stabilityIndex < 50 ? "text-danger" : stabilityIndex < 85 ? "text-warning" : "text-success"}>
+              {stabilityIndex}%
+            </strong>
+          </div>
           <span className="header-divider" />
-          <span className="technical-id">{totalInventory}/{maxInventory} RESOURCES</span>
+          <div className="game-telemetry budget-hud">
+            <span>BUDGET LEFT</span>
+            <strong className={remainingBudget < 200000 ? "text-danger" : remainingBudget < 600000 ? "text-warning" : "text-success"}>
+              {formatCost(remainingBudget)}
+            </strong>
+          </div>
+          <span className="header-divider" />
+          <div className="game-telemetry score-hud">
+            <span>SCORE</span>
+            <strong className="score-glow">{gameScore}</strong>
+          </div>
+          <span className="header-divider" />
+          <div className="game-telemetry time-hud">
+            <span>TIME</span>
+            <strong>{formatDuration(elapsedTime)}</strong>
+          </div>
+          <span className="header-divider" />
+          <div className="game-telemetry rank-hud">
+            <span>RANK</span>
+            <strong style={{ color: rank.color }}>{rank.label}</strong>
+          </div>
         </div>
       </header>
 
@@ -262,9 +304,8 @@ export default function Home() {
         </aside>
 
         <div className="canvas-frame">
-          <div className="coordinate-field" aria-hidden="true" /><div className="map-route-traces" aria-hidden="true" /><div className="canvas-asset canvas-grid-asset" aria-hidden="true" /><div className="canvas-asset canvas-sector-asset" aria-hidden="true" />
           <div className="canvas-topbar">
-            <div className="canvas-label"><Route size={15} /> Directed dependency field</div>
+            <div className="canvas-label"><Route size={15} /> Real-Time GIS Dependency Field</div>
             <div className="state-key" aria-label="Node state legend">
               <span><i className="key-neutral" /> Operational</span>
               <span><i className="key-buffer" /> Buffering</span>
@@ -273,14 +314,84 @@ export default function Home() {
               <span><i className="key-recovered" /> Recovered</span>
             </div>
           </div>
-          <ReactFlow className="cascade-flow" nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.16, minZoom: 0.31, maxZoom: 1.05 }} minZoom={0.28} maxZoom={1.25} onNodeClick={onNodeClick} onEdgeClick={(_, clickedEdge) => { setSelectedNodeId(null); setImpactNodeId(null); setSelectedEdgeId(clickedEdge.id); }} onPaneClick={closeAllContexts} nodesDraggable={false} nodesConnectable={false} elementsSelectable proOptions={{ hideAttribution: true }}><Background color="#3F3F46" gap={24} size={1} variant={BackgroundVariant.Dots} /></ReactFlow>
+          
+          <LiveCityMap 
+            onNodeClick={(id) => { setSelectedEdgeId(null); setImpactNodeId(null); setSelectedNodeId(id); }}
+            onEdgeClick={(id) => { setSelectedNodeId(null); setImpactNodeId(null); setSelectedEdgeId(id); }}
+          />
+
+          {/* Victory / Defeat Overlay Screen */}
+          {isCompleted && (
+            <div className="game-overlay-banner victory-banner">
+              <div className="banner-content animate-banner-slide">
+                <div className="banner-title">MUNICIPAL GRID SECURED</div>
+                <p className="banner-subtitle">Disaster cascade resolved successfully. All systems nominal.</p>
+                
+                <div className="game-stats-grid">
+                  <div className="game-stat-card">
+                    <span>FINAL SCORE</span>
+                    <strong className="score-glow">{gameScore}</strong>
+                  </div>
+                  <div className="game-stat-card">
+                    <span>RESPONSE RANK</span>
+                    <strong style={{ color: rank.color }}>{rank.label}</strong>
+                  </div>
+                  <div className="game-stat-card">
+                    <span>TIME ELAPSED</span>
+                    <strong>{formatDuration(elapsedTime)}</strong>
+                  </div>
+                  <div className="game-stat-card">
+                    <span>REMEDY EXPENSE</span>
+                    <strong>{formatCost(selectedCost)}</strong>
+                  </div>
+                </div>
+                
+                <button className="banner-dismiss-btn" onClick={() => { setStartedChallenge(false); reset(); }}>
+                  <RefreshCcw size={14} style={{ display: "inline", marginRight: 4 }} /> Reset & Play Again
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isLost && (
+            <div className="game-overlay-banner defeat-banner">
+              <div className="banner-content animate-banner-slide">
+                <div className="banner-title">CRITICAL SYSTEM COLLAPSE</div>
+                <p className="banner-subtitle">
+                  {nodes.find(n => n.id === "hospital-icu")?.status === "failed" 
+                    ? "Critical Failure: GMCH Hospital ICU power reserve depleted." 
+                    : "Total Grid Loss: All municipal systems disrupted."}
+                </p>
+                
+                <div className="game-stats-grid">
+                  <div className="game-stat-card">
+                    <span>STABILITY INDEX</span>
+                    <strong style={{ color: "#EF4444" }}>{stabilityIndex}%</strong>
+                  </div>
+                  <div className="game-stat-card">
+                    <span>SURVIVED FOR</span>
+                    <strong>{formatDuration(elapsedTime)}</strong>
+                  </div>
+                  <div className="game-stat-card">
+                    <span>SPENT IN VAIN</span>
+                    <strong>{formatCost(selectedCost)}</strong>
+                  </div>
+                </div>
+                
+                <button className="banner-dismiss-btn retry" onClick={() => { setStartedChallenge(false); reset(); }}>
+                  <RefreshCcw size={14} style={{ display: "inline", marginRight: 4 }} /> Retry Scenario
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="field-readout-deck" aria-label="Field context">
             <div><span>Asset field</span><strong>{String(nodes.length).padStart(2, "0")} live assets</strong></div>
             <div><span>Route integrity</span><strong>{healthyEdgeCount}/{edges.length} pathways</strong></div>
             <div><span>Interventions</span><strong>{selectedRemedies.length} costed actions</strong></div>
             <div><span>Resources</span><strong>{totalInventory}/{maxInventory} available</strong></div>
           </div>
-          <div className="canvas-caption">Municipal base layer · irregular coordinate field</div>
+          <div className="canvas-caption">Nagpur Municipal Base Layer · Live GeoJSON Feed</div>
         </div>
       </section>
 
@@ -353,13 +464,15 @@ export default function Home() {
                   const isRestore = remedy.effect === "restore";
                   const isDepleted = isRestore && stock.available <= 0;
                   const rescueEta = isRestore ? getRescueTimeForNode(selectedNode.id) : 0;
+                  const isAffordable = remedy.cost <= remainingBudget;
+                  const isDisabled = isDepleted || !isAffordable;
 
                   return (
                     <button
-                      className={`remedy-row ${isRestore ? "remedy-restore" : "remedy-buffer"} ${isDepleted ? "remedy-depleted" : ""}`}
+                      className={`remedy-row ${isRestore ? "remedy-restore" : "remedy-buffer"} ${isDepleted ? "remedy-depleted" : ""} ${!isAffordable ? "remedy-unaffordable" : ""}`}
                       type="button"
                       key={remedy.id}
-                      disabled={isDepleted}
+                      disabled={isDisabled}
                       onClick={() => applyRemedy(selectedNode.id, remedy.id)}
                     >
                       <span>
@@ -371,6 +484,7 @@ export default function Home() {
                             <Battery size={9} /> {stock.available}/{inventory[stock.resourceType!].max}
                           </span>
                         )}
+                        {!isAffordable && <span className="unaffordable-badge">OVER BUDGET</span>}
                       </span>
                       <b>{formatCost(remedy.cost)}</b>
                     </button>

@@ -20,6 +20,8 @@ export type InfrastructureNode = {
   sector: "POWER" | "WATER" | "HEALTH" | "MOBILITY" | "COMMS" | "CIVIC";
   x: number;
   y: number;
+  lng: number;
+  lat: number;
   baseBuffer: number;
   buffer: number;
   status: NodeStatus;
@@ -108,7 +110,7 @@ const RESCUE_TIMES: Record<string, number> = {
 };
 
 /** Population weight for impact scoring in the triage predictor. */
-const POPULATION_WEIGHT: Record<string, number> = {
+export const POPULATION_WEIGHT: Record<string, number> = {
   "power-substation": 120000,
   "water-treatment": 85000,
   "telecom-exchange": 60000,
@@ -148,14 +150,14 @@ const BASE_DEPENDENCY_EDGES: DependencyEdge[] = [
 ];
 
 const INITIAL_NODES: InfrastructureNode[] = [
-  { id: "power-substation", assetId: "PWR-01", label: "Power Substation", sector: "POWER", x: 95, y: 360, baseBuffer: 0, buffer: 0, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "water-treatment", assetId: "WTR-11", label: "Water Treatment", sector: "WATER", x: 390, y: 90, baseBuffer: 55, buffer: 55, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "telecom-exchange", assetId: "COM-07", label: "Telecom Exchange", sector: "COMMS", x: 320, y: 555, baseBuffer: 65, buffer: 65, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "metro-signals", assetId: "MOB-03", label: "Metro Signal Grid", sector: "MOBILITY", x: 145, y: 705, baseBuffer: 40, buffer: 40, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "booster-pumps", assetId: "WTR-14", label: "Booster Pumps", sector: "WATER", x: 735, y: 180, baseBuffer: 35, buffer: 35, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "hospital-icu", assetId: "HLT-02", label: "Hospital ICU", sector: "HEALTH", x: 670, y: 405, baseBuffer: 80, buffer: 80, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "emergency-dispatch", assetId: "CIV-09", label: "Emergency Dispatch", sector: "CIVIC", x: 1075, y: 245, baseBuffer: 60, buffer: 60, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
-  { id: "fire-station", assetId: "CIV-21", label: "Fire Station 7", sector: "CIVIC", x: 915, y: 650, baseBuffer: 45, buffer: 45, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "power-substation", assetId: "PWR-01", label: "Power Substation", sector: "POWER", x: 95, y: 360, lng: 79.0305, lat: 21.1302, baseBuffer: 0, buffer: 0, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "water-treatment", assetId: "WTR-11", label: "Water Treatment", sector: "WATER", x: 390, y: 90, lng: 79.0432, lat: 21.1824, baseBuffer: 55, buffer: 55, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "telecom-exchange", assetId: "COM-07", label: "Telecom Exchange", sector: "COMMS", x: 320, y: 555, lng: 79.0768, lat: 21.1534, baseBuffer: 65, buffer: 65, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "metro-signals", assetId: "MOB-03", label: "Metro Signal Grid", sector: "MOBILITY", x: 145, y: 705, lng: 79.0831, lat: 21.1448, baseBuffer: 40, buffer: 40, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "booster-pumps", assetId: "WTR-14", label: "Booster Pumps", sector: "WATER", x: 735, y: 180, lng: 79.0634, lat: 21.1685, baseBuffer: 35, buffer: 35, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "hospital-icu", assetId: "HLT-02", label: "Hospital ICU", sector: "HEALTH", x: 670, y: 405, lng: 79.0984, lat: 21.1278, baseBuffer: 80, buffer: 80, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "emergency-dispatch", assetId: "CIV-09", label: "Emergency Dispatch", sector: "CIVIC", x: 1075, y: 245, lng: 79.0792, lat: 21.1561, baseBuffer: 60, buffer: 60, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
+  { id: "fire-station", assetId: "CIV-21", label: "Fire Station 7", sector: "CIVIC", x: 915, y: 650, lng: 79.1025, lat: 21.1472, baseBuffer: 45, buffer: 45, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null },
 ];
 
 export const REMEDIES_BY_NODE: Record<string, RemedyOption[]> = {

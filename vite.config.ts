@@ -240,5 +240,8 @@ export default defineConfig({
       deny: ["**/.*"],
     },
   },
+  optimizeDeps: {
+    exclude: ["maplibre-gl"],
+  },
 });
 
