@@ -66,14 +66,14 @@ const statusColors: Record<string, { text: string; bg: string; label: string }> 
 };
 
 const NODE_FUNCTIONS: Record<string, string> = {
-  "power-substation": "Acts as the primary electrical transmission hub for the city grid. Steps down extra-high voltage feeds and routes electricity to water treatment facilities, telecom exchanges, and secondary grids. A failure here triggers an immediate power cascade across all dependent sectors.",
-  "water-treatment": "Purifies and pumps critical municipal water supply. Relies heavily on the power substation to operate filter trains and heavy pump machinery. Directly delivers clean water to booster pump stations, securing flow to emergency medical units.",
-  "telecom-exchange": "Anchors the core municipal communications network. Manages fiber-optic backhauls, emergency voice trunk lines, and metro signaling data paths. Operates under battery backup if power fails, but cascades rapidly once backup power depletes.",
-  "metro-signals": "Controls transit network switching and automated rail signals. Synchronizes light rail flow to prevent collisions and minimize public transit delays. Delays in repair response are heavily amplified if civic traffic congestion is elevated.",
-  "booster-pumps": "Maintains pressurized water flow across the regional distribution pipeline. Compensates for gravity loss to ensure emergency services and medical facilities receive uninterrupted water supply. Overloading sibling stations triggers pump overheating.",
-  "hospital-icu": "Operates life-saving medical equipment, intensive care suites, and emergency treatment rooms. Requires uninterrupted water supply and electricity. Directly impacts human lives when operations degrade, causing high population risk.",
-  "emergency-dispatch": "Coordinates police, ambulance, and disaster response units citywide. Acts as the nerve center for incident triage and emergency command communications. Completely dependent on active telecommunication fiber uplinks.",
-  "fire-station": "Dispatches active fire suppression units, rescue vehicles, and emergency crew teams. Responds directly to civic distress calls and hazardous cascading events. Relies on emergency dispatch channels to deploy rescue crews.",
+  "power-substation": "Acts as the primary electrical transmission hub for Nagpur's Hingna industrial corridor and residential grid. Steps down extra-high voltage feeds and routes electricity to Gorewada treatment facilities, telecom exchanges, and secondary grids. A failure here triggers an immediate power cascade.",
+  "water-treatment": "Purifies and pumps critical municipal water supply from the Gorewada reservoir. Relies heavily on the Hingna power substation to operate filter trains and heavy pump machinery. Directly delivers clean water to Seminary Hills booster stations, securing flow to GMCH Nagpur.",
+  "telecom-exchange": "Anchors the core BSNL Sadar telecom communications exchange. Manages Nagpur's fiber-optic backhauls, emergency voice trunk lines, and metro signaling data paths. Operates under battery backup if power fails, but cascades rapidly once backup power depletes.",
+  "metro-signals": "Controls the central Sitabuldi interchange transit network switching and automated rail signals. Synchronizes Nagpur's light rail flow to prevent collisions and minimize public transit delays. Delays in response are heavily amplified if city traffic is gridlocked.",
+  "booster-pumps": "Maintains pressurized water flow across the regional Seminary Hills distribution pipeline. Compensates for gravity loss to ensure Nagpur's emergency services and GMCH medical facilities receive uninterrupted water supply. Overloading triggers pump overheating.",
+  "hospital-icu": "Operates life-saving medical equipment, intensive care suites, and emergency treatment rooms at the Government Medical College & Hospital (GMCH) Nagpur. Requires uninterrupted water supply and electricity. Directly impacts human lives when operations degrade.",
+  "emergency-dispatch": "Coordinates police, ambulance, and disaster response units citywide from the Civil Lines Command Centre. Acts as the nerve center for incident triage and emergency command communications. Completely dependent on active telecommunication fiber uplinks.",
+  "fire-station": "Dispatches active fire suppression units, rescue vehicles, and emergency crew teams from the Ganjipeth Fire Station. Responds directly to civic distress calls and Nagpur's cascading emergencies. Relies on emergency dispatch channels to deploy rescue crews.",
 };
 
 export default function ContextPanel({ selectedNodeId, onClose }: ContextPanelProps) {
@@ -163,7 +163,41 @@ export default function ContextPanel({ selectedNodeId, onClose }: ContextPanelPr
       {/* ── Main Telemetry Deck (Scrollable) ── */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 font-sans scrollbar-thin">
 
+        {/* ── Buffering Live Countdown Card (Yellow Alert State) ── */}
+        {isBuffering && (
+          <section
+            className="p-4 bg-[#1c180e] border border-[#d29922]/40 space-y-3 rounded-2xl"
+            style={{ boxShadow: 'inset 4px 4px 8px #0d0c07, inset -4px -4px 8px #2b2415' }}
+          >
+            <div className="flex justify-between items-center">
+              <span className="flex items-center gap-2 text-[#d29922] font-black text-xs uppercase tracking-wider">
+                <Clock size={15} className="animate-spin text-[#ffffff]" />
+                Backup Buffer Draining
+              </span>
+              <span className="text-xs font-black text-[#ffffff] font-mono px-2 py-0.5 rounded bg-[#2b2415] border border-[#ffffff]/40">
+                {formatTimer(node.buffer)} 
+              </span>
+            </div>
 
+            {/* Buffer Countdown Progress Bar */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-[10px] font-extrabold text-[#8b949e]">
+                <span>RESERVE CAPACITY</span>
+                <span>{Math.round(dangerRatio)}% REMAINING</span>
+              </div>
+              <div className="h-2.5 w-full rounded-full bg-[#0d1117] border border-[#21262d] overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-[#d29922] to-[#f85149] transition-all duration-1000"
+                  style={{ width: `${Math.min(100, Math.max(0, dangerRatio))}%` }}
+                />
+              </div>
+            </div>
+            
+            <p className="text-[10px] text-[#8b949e] font-medium leading-tight">
+              Grid feed severed or load overloaded. Apply a solution before the buffer reaches 00:00 to prevent total asset failure.
+            </p>
+          </section>
+        )}
 
         {/* ── Impact Metrics ── */}
         <section className="p-4 bg-[#0d1117] space-y-3 rounded-2xl" style={{ boxShadow: '6px 6px 14px #040609, -6px -6px 14px #161b22' }}>
@@ -198,7 +232,10 @@ export default function ContextPanel({ selectedNodeId, onClose }: ContextPanelPr
               >
                 <div className="flex items-center gap-2">
                   <Clock size={14} className="text-[#d29922]" />
-                  <span>{remedy.label} (+{remedy.bufferSeconds}s)</span>
+                  <span>
+                    {remedy.label}
+                    {isBuffering && remedy.bufferSeconds ? ` (+${remedy.bufferSeconds}s)` : ""}
+                  </span>
                 </div>
                 <span className="text-[#3fb950] font-bold">
                   ₹{(remedy.cost / 1000).toFixed(0)}k

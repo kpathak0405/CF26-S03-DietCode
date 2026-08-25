@@ -4,7 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSimulationStore } from "@/lib/simulationStore";
 import { getRouteMetadata, getEdgeRouteCoordinates } from "@/lib/routePolylines";
-import { Zap, Droplets, Radio, Heart, Shield, Activity, Bomb, AlertTriangle, CheckCircle2, X } from "lucide-react";
+import { Zap, Droplets, Radio, Heart, Shield, Activity, Bomb, AlertTriangle, CheckCircle2, X, Info } from "lucide-react";
 
 // ============================================================================
 // Style mappings matching GitHub Dark Neumorphic aesthetic
@@ -114,9 +114,9 @@ const DirectSvgEdgesOverlay = ({
         let angle = 0;
         let isFullyOffscreen = false;
 
-        // Helper to clamp values to prevent browser layout dropouts at high zoom
-        const clampX = (val: number) => Math.max(-5000, Math.min(5000, val));
-        const clampY = (val: number) => Math.max(-5000, Math.min(5000, val));
+        // Increase clamp limit to ±500,000 to prevent lines from bending/shifting when zooming in
+        const clampX = (val: number) => Math.max(-500000, Math.min(500000, val));
+        const clampY = (val: number) => Math.max(-500000, Math.min(500000, val));
 
         if (edge.category === "COMMS") {
           // ── TELECOM: Road & Route Street Aligned Polyline ──
@@ -146,18 +146,15 @@ const DirectSvgEdgesOverlay = ({
             isFullyOffscreen = true;
           }
         } else {
-          // ── OTHERS (Power, Water, Civic): Represented as beautiful curved lines ──
-          // Midpoint
+          // ── OTHERS (Power, Water, Civic): Curved lines ──
           const midX = (p1.x + p2.x) / 2;
           const midY = (p1.y + p2.y) / 2;
           
-          // Perpendicular offset based on line bearing
           const dx = p2.x - p1.x;
           const dy = p2.y - p1.y;
           const len = Math.sqrt(dx * dx + dy * dy);
           const offset = len * 0.12; // Curving depth
 
-          // Deterministic curve direction based on ID to avoid straight overlaps
           const curveSign = edge.id.charCodeAt(0) % 2 === 0 ? 1 : -1;
           const cx = clampX(midX + (dy / (len || 1)) * offset * curveSign);
           const cy = clampY(midY - (dx / (len || 1)) * offset * curveSign);
@@ -167,7 +164,6 @@ const DirectSvgEdgesOverlay = ({
           const endX = clampX(p2.x);
           const endY = clampY(p2.y);
 
-          // Quadratic Bezier Curve Path: starts at p1, curves toward control point (cx, cy), ends at p2
           pathData = `M ${startX} ${startY} Q ${cx} ${cy} ${endX} ${endY}`;
 
           // Check viewport visibility
@@ -179,7 +175,6 @@ const DirectSvgEdgesOverlay = ({
             isFullyOffscreen = true;
           }
 
-          // Arrow calculation tangent to the curve's end (vector from control point to end point)
           const adx = endX - cx;
           const ady = endY - cy;
           angle = Math.atan2(ady, adx) * (180 / Math.PI);
@@ -190,28 +185,24 @@ const DirectSvgEdgesOverlay = ({
         }
 
         if (!isFullyOffscreen && pathData) {
-          // Update visible path
           const pathLine = pathsRef.current.get(edge.id);
           if (pathLine) {
             pathLine.setAttribute("d", pathData);
             pathLine.style.display = "";
           }
 
-          // Update invisible wide hitbox
           const pathHitbox = invisibleHitboxesRef.current.get(edge.id);
           if (pathHitbox) {
             pathHitbox.setAttribute("d", pathData);
             pathHitbox.style.display = "";
           }
 
-          // Update Outer Glow
           const pathGlow = pathsRef.current.get(`${edge.id}-glow`);
           if (pathGlow) {
             pathGlow.setAttribute("d", pathData);
             pathGlow.style.display = "";
           }
         } else {
-          // Hide completely if offscreen
           const pathLine = pathsRef.current.get(edge.id);
           if (pathLine) pathLine.style.display = "none";
 
@@ -222,7 +213,6 @@ const DirectSvgEdgesOverlay = ({
           if (pathGlow) pathGlow.style.display = "none";
         }
 
-        // Update Arrow Head (Target Direction)
         const arrow = arrowHeadsRef.current.get(edge.id);
         if (arrow) {
           const isTargetOnScreen = p2.x >= 0 && p2.x <= mapWidth && p2.y >= 0 && p2.y <= mapHeight;
@@ -236,11 +226,36 @@ const DirectSvgEdgesOverlay = ({
       });
     };
 
+    // Continuous JavaScript animation loop for strokeDashoffset to prevent CSS keyframe jumps
+    let animFrameId: number;
+    const animate = () => {
+      const elapsedSeconds = performance.now() / 1000;
+      const speed = 15; // 15px per second
+      const offset = -(elapsedSeconds * speed) % 12;
+
+      edges.forEach((edge) => {
+        if (edge.status !== "broken") {
+          const pathLine = pathsRef.current.get(edge.id);
+          if (pathLine) {
+            pathLine.style.strokeDashoffset = `${offset}px`;
+          }
+        } else {
+          const pathLine = pathsRef.current.get(edge.id);
+          if (pathLine) {
+            pathLine.style.strokeDashoffset = "0px";
+          }
+        }
+      });
+      animFrameId = requestAnimationFrame(animate);
+    };
+
     map.on("render", updatePaths);
     updatePaths(); // run once immediately
+    animate(); // start smooth javascript animation loop
 
     return () => {
       map.off("render", updatePaths);
+      cancelAnimationFrame(animFrameId);
     };
   }, [map, edges, nodes]);
 
@@ -346,6 +361,7 @@ export default function LiveCityMap({ selectedNodeId, selectedEdgeId, onNodeClic
   const [pinnedEdgeId, setPinnedEdgeId] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [pinnedPos, setPinnedPos] = useState<{ x: number; y: number } | null>(null);
+  const [isLegendOpen, setIsLegendOpen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -638,71 +654,96 @@ export default function LiveCityMap({ selectedNodeId, selectedEdgeId, onNodeClic
         })}
       </MapGL>
 
-      {/* ── Static Map Legend Index Box (Fixed at Bottom of Map Canvas) ── */}
-      <div className="absolute bottom-3 left-4 z-40 p-3 rounded-xl bg-[#0d1117]/95 border border-[#30363d] shadow-[6px_6px_14px_#040609] backdrop-blur-md flex flex-col gap-2 max-w-[340px] text-xs select-none">
-        <div className="flex items-center justify-between border-b border-[#21262d] pb-1">
-          <span className="font-extrabold text-[#c9d1d9] tracking-wide text-[11px] uppercase">Infrastructure Legend</span>
-          <span className="text-[10px] text-[#8b949e] font-mono">Nagpur Grid</span>
-        </div>
+      {/* ── Collapsible Map Legend Index Box (Toggled by Info Icon) ── */}
+      <AnimatePresence>
+        {!isLegendOpen ? (
+          <button
+            onClick={() => setIsLegendOpen(true)}
+            className="absolute bottom-3 left-4 z-40 w-9 h-9 rounded-xl bg-[#0d1117]/95 border border-[#30363d] shadow-[4px_4px_8px_#040609] backdrop-blur-md flex items-center justify-center cursor-pointer text-[#8b949e] hover:text-[#ffffff] transition-all hover:scale-105 active:scale-95 pointer-events-auto"
+            title="Show Legend"
+          >
+            <Info size={16} />
+          </button>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            className="absolute bottom-3 left-4 z-40 p-3.5 rounded-xl bg-[#0d1117]/95 border border-[#30363d] shadow-[6px_6px_14px_#040609] backdrop-blur-md flex flex-col gap-2.5 max-w-[340px] text-xs select-none pointer-events-auto"
+          >
+            <div className="flex items-center justify-between border-b border-[#21262d] pb-2">
+              <div className="flex items-center gap-1.5">
+                <Info size={14} className="text-[#58a6ff]" />
+                <span className="font-extrabold text-[#c9d1d9] tracking-wide text-[12px] uppercase">Infrastructure Legend</span>
+              </div>
+              <button
+                onClick={() => setIsLegendOpen(false)}
+                className="p-1 rounded-lg hover:bg-[#21262d] text-[#8b949e] hover:text-[#ffffff] transition-all cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            </div>
 
-        {/* Sector Node Logos Index */}
-        <div>
-          <span className="text-[10px] font-bold text-[#8b949e] uppercase block mb-1">Asset Nodes</span>
-          <div className="grid grid-cols-3 gap-1.5">
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
-              <Zap size={12} className="text-[#e3b341]" />
-              <span>Power</span>
+            {/* Sector Node Logos Index */}
+            <div>
+              <span className="text-[10px] font-bold text-[#8b949e] uppercase block mb-1">Asset Nodes</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
+                  <Zap size={13} className="text-[#e3b341]" />
+                  <span>Power</span>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
+                  <Droplets size={13} className="text-[#38bdf8]" />
+                  <span>Water</span>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
+                  <Radio size={13} className="text-[#a371f7]" />
+                  <span>Telecom</span>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
+                  <Activity size={13} className="text-[#38bdf8]" />
+                  <span>Mobility</span>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
+                  <Heart size={13} className="text-[#f85149]" />
+                  <span>Health</span>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
+                  <Shield size={13} className="text-[#3fb950]" />
+                  <span>Civic</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
-              <Droplets size={12} className="text-[#38bdf8]" />
-              <span>Water</span>
-            </div>
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
-              <Radio size={12} className="text-[#a371f7]" />
-              <span>Telecom</span>
-            </div>
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
-              <Activity size={12} className="text-[#38bdf8]" />
-              <span>Mobility</span>
-            </div>
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
-              <Heart size={12} className="text-[#f85149]" />
-              <span>Health</span>
-            </div>
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-[#c9d1d9]">
-              <Shield size={12} className="text-[#3fb950]" />
-              <span>Civic</span>
-            </div>
-          </div>
-        </div>
 
-        {/* Connector Category Lines Index */}
-        <div className="border-t border-[#21262d] pt-1.5">
-          <span className="text-[10px] font-bold text-[#8b949e] uppercase block mb-1">Connector Categories</span>
-          <div className="grid grid-cols-2 gap-1.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#c9d1d9]">
-              <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#e3b341]" />
-              <span>Power Grid</span>
+            {/* Connector Category Lines Index */}
+            <div className="border-t border-[#21262d] pt-1.5">
+              <span className="text-[10px] font-bold text-[#8b949e] uppercase block mb-1">Connector Categories</span>
+              <div className="grid grid-cols-2 gap-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#c9d1d9]">
+                  <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#e3b341]" />
+                  <span>Power Grid</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#c9d1d9]">
+                  <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#38bdf8]" />
+                  <span>Water Supply</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#c9d1d9]">
+                  <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#a371f7]" />
+                  <span>Telecom Uplink</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#c9d1d9]">
+                  <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#3fb950]" />
+                  <span>Emergency Link</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#f85149] col-span-2">
+                  <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#f85149]" />
+                  <span>Ruptured / Damaged Line</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#c9d1d9]">
-              <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#38bdf8]" />
-              <span>Water Supply</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#c9d1d9]">
-              <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#a371f7]" />
-              <span>Telecom Uplink</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#c9d1d9]">
-              <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#3fb950]" />
-              <span>Emergency Link</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#f85149] col-span-2">
-              <div className="w-3.5 h-[2px] border-b-2 border-dashed border-[#f85149]" />
-              <span>Ruptured / Damaged Line</span>
-            </div>
-          </div>
-        </div>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Dynamic Floating Connection Control Card (Locks at cursor position) ── */}
       <AnimatePresence>

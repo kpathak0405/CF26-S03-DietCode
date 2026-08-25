@@ -65,6 +65,28 @@ export type AppliedRemedy = {
   cost: number;
 };
 
+export type HistoryLogItem = {
+  id: string;
+  timestamp: string;
+  nodeId: string;
+  nodeLabel: string;
+  assetId: string;
+  sector: InfrastructureNode["sector"];
+  actionType: "SOLUTION" | "BLAST" | "PRESET";
+  title: string;
+  cost: number;
+  bufferSeconds?: number;
+};
+
+const getFormattedTimestamp = (): string => {
+  return new Date().toLocaleTimeString("en-IN", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }) + " IST";
+};
+
 export type DisasterPreset = {
   id: "substation-flashover" | "water-main-rupture" | "telecom-blackout" | "seismic-corridor" | "monsoon-flood" | "cyber-attack";
   code: string;
@@ -169,14 +191,14 @@ const BASE_DEPENDENCY_EDGES: DependencyEdge[] = [
 ];
 
 const INITIAL_NODES: InfrastructureNode[] = [
-  { id: "power-substation", assetId: "PWR-01", label: "Power Substation", sector: "POWER", x: 95, y: 360, lng: 79.0305, lat: 21.1302, baseBuffer: 0, buffer: 0, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 100, currentLoad: 82 },
-  { id: "water-treatment", assetId: "WTR-11", label: "Water Treatment", sector: "WATER", x: 390, y: 90, lng: 79.0432, lat: 21.1824, baseBuffer: 55, buffer: 55, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 80, currentLoad: 58 },
-  { id: "telecom-exchange", assetId: "COM-07", label: "Telecom Exchange", sector: "COMMS", x: 320, y: 555, lng: 79.0768, lat: 21.1534, baseBuffer: 65, buffer: 65, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 70, currentLoad: 52 },
-  { id: "metro-signals", assetId: "MOB-03", label: "Metro Signal Grid", sector: "MOBILITY", x: 145, y: 705, lng: 79.0831, lat: 21.1448, baseBuffer: 40, buffer: 40, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 60, currentLoad: 45 },
-  { id: "booster-pumps", assetId: "WTR-14", label: "Booster Pumps", sector: "WATER", x: 735, y: 180, lng: 79.0634, lat: 21.1685, baseBuffer: 35, buffer: 35, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 50, currentLoad: 38 },
-  { id: "hospital-icu", assetId: "HLT-02", label: "Hospital ICU", sector: "HEALTH", x: 670, y: 405, lng: 79.0984, lat: 21.1278, baseBuffer: 80, buffer: 80, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 90, currentLoad: 74 },
-  { id: "emergency-dispatch", assetId: "CIV-09", label: "Emergency Dispatch", sector: "CIVIC", x: 1075, y: 245, lng: 79.0792, lat: 21.1561, baseBuffer: 60, buffer: 60, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 65, currentLoad: 50 },
-  { id: "fire-station", assetId: "CIV-21", label: "Fire Station 7", sector: "CIVIC", x: 915, y: 650, lng: 79.1025, lat: 21.1472, baseBuffer: 45, buffer: 45, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 55, currentLoad: 42 },
+  { id: "power-substation", assetId: "PWR-01", label: "Hingna Power Substation", sector: "POWER", x: 95, y: 360, lng: 79.0305, lat: 21.1302, baseBuffer: 0, buffer: 0, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 100, currentLoad: 82 },
+  { id: "water-treatment", assetId: "WTR-11", label: "Gorewada Water Treatment Plant", sector: "WATER", x: 390, y: 90, lng: 79.0432, lat: 21.1824, baseBuffer: 55, buffer: 55, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 80, currentLoad: 58 },
+  { id: "telecom-exchange", assetId: "COM-07", label: "Sadar Telecom Exchange", sector: "COMMS", x: 320, y: 555, lng: 79.0768, lat: 21.1534, baseBuffer: 65, buffer: 65, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 70, currentLoad: 52 },
+  { id: "metro-signals", assetId: "MOB-03", label: "Sitabuldi Metro Signal Grid", sector: "MOBILITY", x: 145, y: 705, lng: 79.0831, lat: 21.1448, baseBuffer: 40, buffer: 40, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 60, currentLoad: 45 },
+  { id: "booster-pumps", assetId: "WTR-14", label: "Seminary Hills Booster Pumps", sector: "WATER", x: 735, y: 180, lng: 79.0634, lat: 21.1685, baseBuffer: 35, buffer: 35, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 50, currentLoad: 38 },
+  { id: "hospital-icu", assetId: "HLT-02", label: "GMCH Nagpur ICU", sector: "HEALTH", x: 670, y: 405, lng: 79.0984, lat: 21.1278, baseBuffer: 80, buffer: 80, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 90, currentLoad: 74 },
+  { id: "emergency-dispatch", assetId: "CIV-09", label: "Civil Lines Dispatch Centre", sector: "CIVIC", x: 1075, y: 245, lng: 79.0792, lat: 21.1561, baseBuffer: 60, buffer: 60, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 65, currentLoad: 50 },
+  { id: "fire-station", assetId: "CIV-21", label: "Ganjipeth Fire Station", sector: "CIVIC", x: 915, y: 650, lng: 79.1025, lat: 21.1472, baseBuffer: 45, buffer: 45, status: "operational", rescueTimer: 0, maxRescueTime: 0, deployedResource: null, capacity: 55, currentLoad: 42 },
 ];
 
 export const REMEDIES_BY_SECTOR: Record<string, RemedyOption[]> = {
@@ -383,6 +405,7 @@ type SimulationState = {
   inventory: CityInventory;
   activePresetId: DisasterPreset["id"] | null;
   selectedRemedies: AppliedRemedy[];
+  history: HistoryLogItem[];
   // ── Live Impact Analytics ──
   cityTrafficMultiplier: number;
   totalPeopleAffected: number;
@@ -407,6 +430,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
   inventory: cloneInventory(),
   activePresetId: null,
   selectedRemedies: [],
+  history: [],
   cityTrafficMultiplier: 1.0,
   totalPeopleAffected: 0,
   totalFinancialLoss: 0,
@@ -544,10 +568,23 @@ export const useSimulationStore = create<SimulationState>((set) => ({
         failed = applyOverloadRedistribution(failed, state.edges, [nodeId]);
       }
 
+      const blastHistoryLog: HistoryLogItem | null = blastedNode ? {
+        id: `hist-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        timestamp: getFormattedTimestamp(),
+        nodeId,
+        nodeLabel: blastedNode.label,
+        assetId: blastedNode.assetId,
+        sector: blastedNode.sector,
+        actionType: "BLAST",
+        title: "Manual Disruption (Blast)",
+        cost: 0,
+      } : null;
+
       return {
         nodes: recalculateDependents(failed, state.edges),
         inventory: newInventory,
         activePresetId: null,
+        history: blastHistoryLog ? [blastHistoryLog, ...state.history] : state.history,
       };
     }),
 
@@ -588,6 +625,19 @@ export const useSimulationStore = create<SimulationState>((set) => ({
         cost: remedy.cost,
       };
 
+      const appliedHistoryLog: HistoryLogItem = {
+        id: `hist-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        timestamp: getFormattedTimestamp(),
+        nodeId,
+        nodeLabel: target.label,
+        assetId: target.assetId,
+        sector: target.sector,
+        actionType: "SOLUTION",
+        title: remedy.label,
+        cost: remedy.cost,
+        bufferSeconds: target.status === "buffering" ? remedy.bufferSeconds : undefined,
+      };
+
       return {
         nodes: recalculateDependents(updatedNodes, state.edges),
         inventory: newInventory,
@@ -595,6 +645,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
           ...state.selectedRemedies.filter((item) => item.nodeId !== nodeId),
           applied,
         ],
+        history: [appliedHistoryLog, ...state.history],
         activePresetId: null,
       };
     }),
@@ -666,6 +717,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
         inventory: cloneInventory(),
         activePresetId: preset.id,
         selectedRemedies: [],
+        history: [],
         cityTrafficMultiplier: computeTrafficMultiplier(finalNodes),
         totalPeopleAffected,
         totalFinancialLoss: 0,
@@ -681,6 +733,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       inventory: cloneInventory(),
       activePresetId: null,
       selectedRemedies: [],
+      history: [],
       cityTrafficMultiplier: 1.0,
       totalPeopleAffected: 0,
       totalFinancialLoss: 0,

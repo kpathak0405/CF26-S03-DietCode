@@ -20,7 +20,10 @@ import {
   Upload,
   Clock,
   Circle,
-  ChevronDown
+  ChevronDown,
+  History,
+  Coins,
+  CheckCircle2
 } from "lucide-react";
 
 
@@ -28,11 +31,13 @@ export default function DashboardLayout() {
   const nodes = useSimulationStore((state) => state.nodes);
   const edges = useSimulationStore((state) => state.edges);
   const activePresetId = useSimulationStore((state) => state.activePresetId);
+  const history = useSimulationStore((state) => state.history);
 
   const totalPeopleAffected = useSimulationStore((state) => state.totalPeopleAffected);
   const totalFinancialLoss = useSimulationStore((state) => state.totalFinancialLoss);
   const cascadeDepth = useSimulationStore((state) => state.cascadeDepth);
   const peakFailedCount = useSimulationStore((state) => state.peakFailedCount);
+  const totalSpentOnRemedies = history.reduce((sum, item) => sum + item.cost, 0);
   const cityTrafficMultiplier = useSimulationStore((state) => state.cityTrafficMultiplier);
   
   const tick = useSimulationStore((state) => state.tick);
@@ -110,32 +115,22 @@ export default function DashboardLayout() {
     <main className="h-screen w-screen overflow-hidden flex flex-col bg-[#0d1117] text-[#c9d1d9] font-sans select-none relative">
       
       {/* ── Top Bar (GitHub Dark Neumorphic Header) ── */}
-      <header className="h-14 bg-[#0d1117] flex items-center justify-between px-6 z-40 text-[#8b949e] font-sans text-xs tracking-wide" style={{ boxShadow: '0 4px 10px #040609, 0 -2px 4px #161b22' }}>
-        <div className="flex items-center gap-4">
+      <header className="h-18 bg-[#0d1117] flex items-center justify-between px-6 z-40 text-[#8b949e] font-sans text-l tracking-wide" style={{ boxShadow: '0 4px 10px #040609, 0 -2px 4px #161b22' }}>
+        <div className="flex items-center gap-10">
           <div className="flex items-center gap-2 text-[#ffffff] font-extrabold text-sm tracking-wide">
-            <Crosshair size={16} className="text-[#58a6ff]" />
-            <span>Urban Cascade Field // Live Metrics</span>
+            <Crosshair size={30} className="text-[#58a6ff]" />
+            <span>Pralayaant</span>
           </div>
           <span className="text-[#21262d]">|</span>
           <div className="flex items-center gap-2 text-[#8b949e] font-bold text-xs">
-            <span className="h-2 w-2 rounded-full bg-[#3fb950] animate-ping" />
-            <span>Nagpur Grid Sector 04</span>
+            <span className="h-2 w-1 rounded-full bg-[#3fb950] animate-ping" />
+            <span>Nagpur Grid Sector</span>
           </div>
         </div>
 
         <div className="flex items-center gap-6">
           {/* Traffic / Gridlock Status */}
-          {isGridlock ? (
-            <div className="flex items-center gap-2 text-[#f85149] font-extrabold text-xs px-3.5 py-1.5 rounded-xl" style={{ boxShadow: 'inset 3px 3px 6px #080404, inset -3px -3px 6px #240c0c', background: '#1c0c0d' }}>
-              <AlertTriangle size={13} className="animate-bounce" />
-              <span>Gridlock Active (Transit ×{cityTrafficMultiplier})</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 text-[#3fb950] font-extrabold text-xs">
-              <Circle size={10} className="fill-[#3fb950]" />
-              <span>System: Operational</span>
-            </div>
-          )}
+          
 
           <span className="text-[#21262d]">|</span>
 
@@ -143,10 +138,10 @@ export default function DashboardLayout() {
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setIsPresetsOpen(!isPresetsOpen)}
-              className="px-3.5 py-1.5 flex items-center gap-2 transition-all rounded-xl font-extrabold text-xs bg-[#0d1117] text-[#d29922] hover:text-[#ffffff]"
+              className="px-3.5 py-1.5 flex items-center gap-2 transition-all rounded-xl font-extrabold text-xs bg-[#0d1117] text-[#ffffff] hover:text-[#ffffff]"
               style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}
             >
-              <Flame size={14} className="text-[#d29922]" />
+              <Flame size={14} className="text-[#d29925]" />
               <span>Strike Presets</span>
               <ChevronDown size={14} className={`transition-transform duration-200 ${isPresetsOpen ? "rotate-180" : ""}`} />
             </button>
@@ -239,7 +234,7 @@ export default function DashboardLayout() {
               <div className="flex justify-between items-center text-[#8b949e] pb-2.5" style={{ borderBottom: '1px solid #161b22' }}>
                 <span className="flex items-center gap-2 text-[#ffffff] font-extrabold text-sm tracking-wide">
                   <Activity size={17} className="text-[#3fb950]" />
-                  Telemetry Scoreboard
+                  Analytics 
                 </span>
                 <span className="text-xs font-bold text-[#58a6ff]">Live Feed</span>
               </div>
@@ -252,8 +247,8 @@ export default function DashboardLayout() {
                   </strong>
                 </div>
                 <div className="p-4 rounded-xl bg-[#0d1117]" style={{ boxShadow: 'inset 4px 4px 8px #040609, inset -4px -4px 8px #161b22' }}>
-                  <span className="text-[11px] text-[#8b949e] font-extrabold block mb-1">Cascade Depth</span>
-                  <strong className="text-lg font-black text-[#d29922] tracking-wider">
+                  <span className="text-[11px] text-[#8b949e] font-extrabold block mb-1">Cascade Level</span>
+                  <strong className="text-lg font-black text-[#ffffff] tracking-wider">
                     Level {cascadeDepth}
                   </strong>
                 </div>
@@ -268,30 +263,132 @@ export default function DashboardLayout() {
                   </strong>
                 </div>
                 <div className="text-right">
-                  <span className="text-[11px] text-[#8b949e] font-bold block">Peak Failures</span>
+                  
                   <span className="text-base font-black text-[#f85149]">{peakFailedCount} Assets</span>
                 </div>
               </div>
             </section>
 
-            {/* ── Block 2: Scenario Import / Export IO ── */}
-            <section className="p-4 bg-[#0d1117] flex gap-3 rounded-2xl" style={{ boxShadow: '6px 6px 14px #040609, -6px -6px 14px #161b22' }}>
+            {/* ── Block 2: Operations & Solutions History ── */}
+            <section className="p-5 bg-[#0d1117] space-y-4 rounded-2xl" style={{ boxShadow: '6px 6px 14px #040609, -6px -6px 14px #161b22' }}>
+              <div className="flex justify-between items-center text-[#8b949e] pb-2.5" style={{ borderBottom: '1px solid #161b22' }}>
+                <span className="flex items-center gap-2 text-[#ffffff] font-extrabold text-sm tracking-wide">
+                  <History size={17} className="text-[#58a6ff]" />
+                  Operations History
+                </span>
+                <span className="text-xs font-bold text-[#3fb950] px-2 py-0.5 rounded-full bg-[#0d1e13]">
+                  {history.length} {history.length === 1 ? "Entry" : "Entries"}
+                </span>
+              </div>
+
+              {/* Total Amount Spent Metric */}
+              <div className="p-3.5 rounded-xl bg-[#0d1117] flex justify-between items-center" style={{ boxShadow: 'inset 4px 4px 8px #040609, inset -4px -4px 8px #161b22' }}>
+                <div className="flex items-center gap-2 text-[#8b949e]">
+                  <Coins size={15} className="text-[#d29922]" />
+                  <span className="text-[11px] font-extrabold">Total Amount Spent</span>
+                </div>
+                <strong className="text-sm font-black text-[#3fb950]">
+                  {totalSpentOnRemedies >= 100000 
+                    ? `₹${(totalSpentOnRemedies / 100000).toFixed(2)} Lakhs` 
+                    : `₹${totalSpentOnRemedies.toLocaleString("en-IN")}`}
+                </strong>
+              </div>
+
+              {/* History Log Feed */}
+              <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1 scrollbar-thin">
+                {history.length === 0 ? (
+                  <div className="p-4 rounded-xl text-center border border-dashed border-[#21262d] bg-[#0d1117] space-y-1">
+                    <span className="text-xs font-bold text-[#8b949e] block">No Operations Recorded</span>
+                    <p className="text-[10px] text-[#484f58]">
+                      Select an asset node on the map to trigger disruption or deploy solutions.
+                    </p>
+                  </div>
+                ) : (
+                  history.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-3.5 rounded-xl bg-[#0d1117] space-y-2 text-xs transition-all border border-[#161b22]"
+                      style={{ boxShadow: 'inset 2px 2px 4px #040609, inset -2px -2px 4px #161b22' }}
+                    >
+                      {/* Header Row: Node Label & Sector Badge */}
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex items-center gap-1.5 overflow-hidden">
+                          <span className="text-xs font-black text-[#ffffff] truncate">
+                            {item.nodeLabel}
+                          </span>
+                          <span className="text-[9px] font-extrabold text-[#58a6ff] bg-[#0e1a24] px-1.5 py-0.5 rounded border border-[#58a6ff]/20">
+                            {item.assetId}
+                          </span>
+                        </div>
+
+                        <span
+                          className={`px-2 py-0.5 text-[9px] font-black rounded-full uppercase tracking-wider shrink-0 ${
+                            item.actionType === "SOLUTION"
+                              ? "bg-[#0d1e13] text-[#3fb950] border border-[#3fb950]/30"
+                              : "bg-[#200f11] text-[#f85149] border border-[#f85149]/30"
+                          }`}
+                        >
+                          {item.actionType === "SOLUTION" ? "Solution" : "Disruption"}
+                        </span>
+                      </div>
+
+                      {/* Solution / Operation Title */}
+                      <div className="flex items-center justify-between text-[#c9d1d9] font-extrabold text-[11px] pt-1">
+                        <span className="flex items-center gap-1.5 text-[#e6edf3]">
+                          {item.actionType === "SOLUTION" ? (
+                            <CheckCircle2 size={13} className="text-[#3fb950]" />
+                          ) : (
+                            <Flame size={13} className="text-[#f85149]" />
+                          )}
+                          {item.title}
+                        </span>
+                        {item.bufferSeconds && (
+                          <span className="text-[10px] text-[#d29922] font-bold">
+                            +{item.bufferSeconds}s Buffer
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Footer Row: Timestamp & Amount Spent */}
+                      <div className="flex justify-between items-center pt-1.5 border-t border-[#161b22] text-[10px] text-[#8b949e] font-bold">
+                        <div className="flex items-center gap-1">
+                          <Clock size={11} className="text-[#8b949e]" />
+                          <span>{item.timestamp}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[#8b949e] font-normal mr-1">Amount Spent:</span>
+                          <strong className={item.cost > 0 ? "text-[#3fb950] font-black text-xs" : "text-[#8b949e]"}>
+                            {item.cost > 0 ? `₹${item.cost.toLocaleString("en-IN")}` : "₹0"}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </div>
+
+          {/* ── Pinned Scenario Import / Export IO (Silent & Elegant) ── */}
+          <div className="p-3.5 border-t border-[#21262d] bg-[#0d1117] space-y-2">
+            <span className="text-[9px] text-[#8b949e] font-bold uppercase tracking-wider block text-center opacity-60">Data Exchange</span>
+            <div className="flex gap-2.5">
               <button
                 onClick={handleExportJSON}
-                className="flex-1 py-3 px-3 text-[#ffffff] hover:text-[#58a6ff] rounded-xl flex items-center justify-center gap-2 transition-all bg-[#0d1117] text-sm font-extrabold"
-                style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}
+                className="flex-1 py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all bg-[#0d1117] border border-[#21262d] text-[#8b949e] hover:text-[#58a6ff] hover:border-[#30363d] text-xs font-extrabold active:scale-95 shadow-[inset_1px_1px_2px_rgba(255,255,255,0.02)]"
               >
-                <Download size={15} className="text-[#3fb950]" />
-                <span>Export .JSON</span>
+                <Download size={13} className="opacity-80" />
+                <span>Export JSON</span>
               </button>
 
-              <label className="flex-1 py-3 px-3 text-[#ffffff] hover:text-[#58a6ff] rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all bg-[#0d1117] text-sm font-extrabold" style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}>
-                <Upload size={15} className="text-[#58a6ff]" />
-                <span>Load .JSON</span>
+              <label
+                className="flex-1 py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all bg-[#0d1117] border border-[#21262d] text-[#8b949e] hover:text-[#58a6ff] hover:border-[#30363d] text-xs font-extrabold active:scale-95 shadow-[inset_1px_1px_2px_rgba(255,255,255,0.02)]"
+              >
+                <Upload size={13} className="opacity-80" />
+                <span>Load JSON</span>
                 <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
               </label>
-            </section>
-
+            </div>
           </div>
 
           {/* Left Footer System Readout */}
@@ -319,7 +416,7 @@ export default function DashboardLayout() {
 
           {/* Coordinate Watermarks */}
           <div className="absolute top-4 left-4 pointer-events-none text-[#484f58] font-mono text-[9px] z-20 px-3 py-1.5 rounded-xl bg-[#0d1117]" style={{ boxShadow: '3px 3px 6px #040609, -3px -3px 6px #161b22' }}>
-            <span>LAT 21.1458° N // LNG 79.0882° E</span>
+            
           </div>
 
           {/* ── Right Action Panel (Context Drawer via Framer Motion) ── */}
