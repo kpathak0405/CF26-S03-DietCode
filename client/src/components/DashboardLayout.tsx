@@ -4,10 +4,12 @@ import {
   useSimulationStore, 
   DISASTER_PRESETS,
   exportAfterActionReport,
-  loadScenarioFromJSON
+  loadScenarioFromJSON,
+  type HistoryLogItem
 } from "@/lib/simulationStore";
 import LiveCityMap from "./LiveCityMap";
 import ContextPanel from "./ContextPanel";
+import { getEtherscanLink, logInterventionOnChain, type TxStatus } from "@/lib/web3Service";
 import { 
   Activity, 
   RotateCcw, 
@@ -23,7 +25,10 @@ import {
   ChevronDown,
   History,
   Coins,
-  CheckCircle2
+  CheckCircle2,
+  ShieldCheck,
+  ExternalLink,
+  Loader2
 } from "lucide-react";
 
 
@@ -32,6 +37,35 @@ export default function DashboardLayout() {
   const edges = useSimulationStore((state) => state.edges);
   const activePresetId = useSimulationStore((state) => state.activePresetId);
   const history = useSimulationStore((state) => state.history);
+  const updateHistoryTxHash = useSimulationStore((state) => state.updateHistoryTxHash);
+
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [verifyStatus, setVerifyStatus] = useState<TxStatus>("idle");
+  const [verifyError, setVerifyError] = useState<{ id: string; msg: string } | null>(null);
+
+  const handleVerifyPayment = async (item: HistoryLogItem) => {
+    setVerifyingId(item.id);
+    setVerifyError(null);
+    const res = await logInterventionOnChain(
+      {
+        nodeId: item.nodeId,
+        assetId: item.assetId,
+        sector: item.sector,
+        actionType: "SOLUTION",
+        title: item.title,
+        cost: item.cost,
+      },
+      (status) => setVerifyStatus(status)
+    );
+
+    if (res.status === "confirmed" && res.txHash) {
+      updateHistoryTxHash(item.id, res.txHash, "confirmed");
+    } else if (res.error) {
+      setVerifyError({ id: item.id, msg: res.error });
+    }
+    setVerifyingId(null);
+    setVerifyStatus("idle");
+  };
 
   const totalPeopleAffected = useSimulationStore((state) => state.totalPeopleAffected);
   const totalFinancialLoss = useSimulationStore((state) => state.totalFinancialLoss);
@@ -349,18 +383,67 @@ export default function DashboardLayout() {
                         )}
                       </div>
 
-                      {/* Footer Row: Timestamp & Amount Spent */}
-                      <div className="flex justify-between items-center pt-1.5 border-t border-[#161b22] text-[10px] text-[#8b949e] font-bold">
-                        <div className="flex items-center gap-1">
-                          <Clock size={11} className="text-[#8b949e]" />
-                          <span>{item.timestamp}</span>
+                      {/* Footer Row: Timestamp, Verification & Amount Spent */}
+                      <div className="pt-2 border-t border-[#161b22] space-y-1.5">
+                        <div className="flex justify-between items-center text-[10px] text-[#8b949e] font-bold">
+                          <div className="flex items-center gap-1">
+                            <Clock size={11} className="text-[#8b949e]" />
+                            <span>{item.timestamp}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[#8b949e] font-normal mr-1">Amount Spent:</span>
+                            <strong className={item.cost > 0 ? "text-[#3fb950] font-black text-xs" : "text-[#8b949e]"}>
+                              {item.cost > 0 ? `₹${item.cost.toLocaleString("en-IN")}` : "₹0"}
+                            </strong>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <span className="text-[#8b949e] font-normal mr-1">Amount Spent:</span>
-                          <strong className={item.cost > 0 ? "text-[#3fb950] font-black text-xs" : "text-[#8b949e]"}>
-                            {item.cost > 0 ? `₹${item.cost.toLocaleString("en-IN")}` : "₹0"}
-                          </strong>
-                        </div>
+
+                        {/* Blockchain Payment Verification — Only for Solution / Repairing Tasks */}
+                        {item.actionType === "SOLUTION" && (
+                          <div className="pt-1 flex items-center justify-between">
+                            {item.txHash ? (
+                              <a
+                                href={getEtherscanLink(item.txHash)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-[9px] text-[#3fb950] bg-[#0d1e13] px-2 py-1 rounded-lg border border-[#3fb950]/30 hover:underline font-extrabold"
+                              >
+                                <ShieldCheck size={11} />
+                                <span>Verified on Etherscan ({item.txHash.slice(0, 6)}...{item.txHash.slice(-4)})</span>
+                                <ExternalLink size={9} />
+                              </a>
+                            ) : (
+                              <button
+                                onClick={() => handleVerifyPayment(item)}
+                                disabled={verifyingId === item.id}
+                                className="py-1 px-2.5 rounded-lg bg-[#0e1a24] border border-[#58a6ff]/30 text-[#58a6ff] hover:text-[#79c0ff] hover:border-[#58a6ff]/60 text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                              >
+                                {verifyingId === item.id ? (
+                                  <>
+                                    <Loader2 size={11} className="animate-spin text-[#58a6ff]" />
+                                    <span>
+                                      {verifyStatus === "connecting" && "Connecting..."}
+                                      {verifyStatus === "awaiting_signature" && "Approve in MetaMask..."}
+                                      {verifyStatus === "mining" && "Confirming..."}
+                                      {(verifyStatus === "idle" || verifyStatus === "confirmed" || verifyStatus === "error") && "Verifying..."}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ShieldCheck size={11} className="text-[#58a6ff]" />
+                                    <span>Verify Payment on Chain</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {verifyError?.id === item.id && (
+                          <p className="text-[9px] text-[#f85149] font-medium leading-tight pt-0.5">
+                            {verifyError.msg}
+                          </p>
+                        )}
                       </div>
                     </div>
                   ))

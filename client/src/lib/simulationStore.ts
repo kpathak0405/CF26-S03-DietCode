@@ -76,6 +76,8 @@ export type HistoryLogItem = {
   title: string;
   cost: number;
   bufferSeconds?: number;
+  txHash?: string;
+  blockchainStatus?: "pending" | "confirmed" | "failed";
 };
 
 const getFormattedTimestamp = (): string => {
@@ -420,6 +422,7 @@ type SimulationState = {
   repairEdge: (edgeId: string) => void;
   applyPreset: (presetId: DisasterPreset["id"]) => void;
   reset: () => void;
+  updateHistoryTxHash: (historyId: string, txHash: string, blockchainStatus?: "pending" | "confirmed" | "failed") => void;
 };
 
 // ─── Store Implementation ────────────────────────────────────────────────────
@@ -740,6 +743,13 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       cascadeDepth: 0,
       peakFailedCount: 0,
     }),
+
+  updateHistoryTxHash: (historyId, txHash, blockchainStatus = "confirmed") =>
+    set((state) => ({
+      history: state.history.map((item) =>
+        item.id === historyId ? { ...item, txHash, blockchainStatus } : item
+      ),
+    })),
 }));
 
 // ─── Selectors & Helpers ─────────────────────────────────────────────────────

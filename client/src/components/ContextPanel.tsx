@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { 
   useSimulationStore, 
@@ -8,6 +8,11 @@ import {
   type InfrastructureNode,
   type ResourceType 
 } from "@/lib/simulationStore";
+import {
+  logInterventionOnChain,
+  getEtherscanLink,
+  type TxStatus
+} from "@/lib/web3Service";
 
 import { 
   X, 
@@ -19,7 +24,10 @@ import {
   Shield, 
   Activity, 
   Clock, 
-  Flame
+  Flame,
+  ShieldCheck,
+  ExternalLink,
+  Loader2
 } from "lucide-react";
 
 
